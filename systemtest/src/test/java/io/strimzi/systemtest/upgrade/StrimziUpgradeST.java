@@ -180,7 +180,7 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         assertNoCoErrorsLogged(0);
     }
 
-    private JsonObject buildDataForUpgradeAcrossVersions() {
+    private JsonObject buildDataForUpgradeAcrossVersions() throws IOException {
         List<TestKafkaVersion> sortedVersions = TestKafkaVersion.getKafkaVersions();
         TestKafkaVersion latestKafkaSupported = sortedVersions.get(sortedVersions.size() - 1);
 
@@ -198,6 +198,8 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         acrossUpgradeData.put("toExamples", "HEAD");
 
         acrossUpgradeData.put("startingKafkaVersion", startingVersion.getString("oldestKafka"));
+        acrossUpgradeData.put("defaultKafka", startingVersion.getString("defaultKafka"));
+        acrossUpgradeData.put("oldestKafka", startingVersion.getString("oldestKafka"));
 
         // Generate procedures for upgrade
         JsonObject procedures = new JsonObject();
@@ -206,10 +208,12 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         procedures.put("interBrokerProtocolVersion", latestKafkaSupported.protocolVersion());
         acrossUpgradeData.put("proceduresAfterOperatorUpgrade", procedures);
 
+        LOGGER.info("Upgrade Json for the test: {}", acrossUpgradeData.encodePrettily());
+
         return acrossUpgradeData;
     }
 
-    private JsonObject getDataForStartUpgrade(JsonArray upgradeJson) {
+    private JsonObject getDataForStartUpgrade(JsonArray upgradeJson) throws IOException {
         List<TestKafkaVersion> sortedVersions = TestKafkaVersion.getKafkaVersions();
         List<String> versions = sortedVersions.stream().map(item -> item.version()).collect(Collectors.toList());
 
@@ -218,7 +222,12 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         JsonObject startingVersion = null;
 
         for (Object item : upgradeJson) {
-            if (!versions.contains(((JsonObject) item).getString("oldestKafka"))) {
+            List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.parseKafkaVersionsFromUrl("https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/" + ((JsonObject) item).getValue("fromVersion") + "/kafka-versions.yaml");
+            TestKafkaVersion defaultVersion = testKafkaVersions.stream().filter(TestKafkaVersion::isDefault).collect(Collectors.toList()).get(0);
+
+            ((JsonObject) item).put("defaultKafka", defaultVersion.version());
+
+            if (!versions.contains(((JsonObject) item).getString("oldestKafka")) && !defaultVersion.version().equals(TestKafkaVersion.getDefaultVersion().version())) {
                 startingVersion = (JsonObject) item;
                 break;
             }
@@ -244,19 +253,16 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         setupEnvAndUpgradeClusterOperator(testParameters, producerName, consumerName, continuousTopicName, continuousConsumerGroup, "", NAMESPACE);
         // Upgrade CO
         changeClusterOperator(testParameters, NAMESPACE);
-        // Wait for Kafka cluster rolling update
-        waitForKafkaClusterRollingUpdate();
-        checkAllImages(testParameters.getJsonObject("imagesBeforeKafkaUpgrade"));
         logPodImages(clusterName);
         //  Upgrade kafka
         changeKafkaAndLogFormatVersion(testParameters.getJsonObject("proceduresAfterOperatorUpgrade"), testParameters, clusterName, extensionContext);
         logPodImages(clusterName);
         checkAllImages(testParameters.getJsonObject("imagesAfterKafkaUpgrade"));
 
-        // Verify upgrade
-        verifyProcedure(testParameters, producerName, consumerName, NAMESPACE);
         // Verify that pods are stable
         PodUtils.verifyThatRunningPodsAreStable(clusterName);
+        // Verify upgrade
+        verifyProcedure(testParameters, producerName, consumerName, NAMESPACE);
 
         // Check errors in CO log
         assertNoCoErrorsLogged(0);
