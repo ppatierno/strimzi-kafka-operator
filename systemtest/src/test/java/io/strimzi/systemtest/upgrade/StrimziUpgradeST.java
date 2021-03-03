@@ -244,17 +244,19 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         setupEnvAndUpgradeClusterOperator(testParameters, producerName, consumerName, continuousTopicName, continuousConsumerGroup, "", NAMESPACE);
         // Upgrade CO
         changeClusterOperator(testParameters, NAMESPACE);
+        // Wait for Kafka cluster rolling update
+        waitForKafkaClusterRollingUpdate();
+        checkAllImages(testParameters.getJsonObject("imagesBeforeKafkaUpgrade"));
         logPodImages(clusterName);
-        makeSnapshots(clusterName);
         //  Upgrade kafka
         changeKafkaAndLogFormatVersion(testParameters.getJsonObject("proceduresAfterOperatorUpgrade"), testParameters, clusterName, extensionContext);
         logPodImages(clusterName);
         checkAllImages(testParameters.getJsonObject("imagesAfterKafkaUpgrade"));
 
-        // Verify that pods are stable
-        PodUtils.verifyThatRunningPodsAreStable(clusterName);
         // Verify upgrade
         verifyProcedure(testParameters, producerName, consumerName, NAMESPACE);
+        // Verify that pods are stable
+        PodUtils.verifyThatRunningPodsAreStable(clusterName);
 
         // Check errors in CO log
         assertNoCoErrorsLogged(0);
