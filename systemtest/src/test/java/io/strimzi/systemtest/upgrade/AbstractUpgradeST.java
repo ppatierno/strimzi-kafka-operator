@@ -207,9 +207,6 @@ public class AbstractUpgradeST extends AbstractST {
                 LOGGER.info("Wait until kafka rolling update is finished");
                 kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
             }
-        } else {
-            LOGGER.info("Waiting for all rolling updates finished - update of version)");
-            kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
         }
     }
 
@@ -417,8 +414,9 @@ public class AbstractUpgradeST extends AbstractST {
             // ##############################
             // Setup topic, which has 3 replicas and 2 min.isr to see if producer will be able to work during rolling update
             if (!cmdKubeClient().getResources(getResourceApiVersion(KafkaTopic.RESOURCE_PLURAL, operatorVersion)).contains(continuousTopicName)) {
+                String pathToTopicExamples = testParameters.getString("fromExamples").equals("HEAD") ? KafkaTopicResource.PATH_TO_KAFKA_TOPIC_CONFIG : testParameters.getString("fromExamples") + "/examples/topic/kafka-topic.yaml";
 
-                kafkaTopicYaml = new File(dir, testParameters.getString("fromExamples") + "/examples/topic/kafka-topic.yaml");
+                kafkaTopicYaml = new File(dir, pathToTopicExamples);
                 cmdKubeClient().applyContent(TestUtils.getContent(kafkaTopicYaml, TestUtils::toYamlString)
                         .replace("name: \"my-topic\"", "name: \"" + continuousTopicName + "\"")
                         .replace("partitions: 1", "partitions: 3")
