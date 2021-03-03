@@ -146,7 +146,7 @@ public class AbstractUpgradeST extends AbstractST {
         // #######################################################################
         // #################    Update CRs to latest version   ###################
         // #######################################################################
-        String toUrl = operatorVersion;
+        String toUrl = testParameters.getString("urlTo");
         String examplesPath = "";
         if (toUrl.equals("HEAD")) {
             examplesPath = TestUtils.USER_PATH + "/../examples";

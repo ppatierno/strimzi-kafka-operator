@@ -222,8 +222,7 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         JsonObject startingVersion = null;
 
         for (Object item : upgradeJson) {
-            List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.parseKafkaVersionsFromUrl("https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/" + ((JsonObject) item).getValue("fromVersion") + "/kafka-versions.yaml");
-            TestKafkaVersion defaultVersion = testKafkaVersions.stream().filter(TestKafkaVersion::isDefault).collect(Collectors.toList()).get(0);
+            TestKafkaVersion defaultVersion = getDefaultKafkaVersionPerStrimzi(((JsonObject) item).getValue("fromVersion").toString());
 
             ((JsonObject) item).put("defaultKafka", defaultVersion.version());
 
@@ -252,7 +251,13 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
         // Setup env
         setupEnvAndUpgradeClusterOperator(testParameters, producerName, consumerName, continuousTopicName, continuousConsumerGroup, "", NAMESPACE);
         // Upgrade CO
+        logPodImages(clusterName);
         changeClusterOperator(testParameters, NAMESPACE);
+
+        if (TestKafkaVersion.containsVersion(getDefaultKafkaVersionPerStrimzi(testParameters.getString("fromVersion")).version())) {
+            waitForKafkaClusterRollingUpdate();
+        }
+
         logPodImages(clusterName);
         //  Upgrade kafka
         changeKafkaAndLogFormatVersion(testParameters.getJsonObject("proceduresAfterOperatorUpgrade"), testParameters, clusterName, extensionContext);
@@ -266,6 +271,11 @@ public class StrimziUpgradeST extends AbstractUpgradeST {
 
         // Check errors in CO log
         assertNoCoErrorsLogged(0);
+    }
+
+    private TestKafkaVersion getDefaultKafkaVersionPerStrimzi(String strimziVersion) throws IOException {
+        List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.parseKafkaVersionsFromUrl("https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/" + strimziVersion + "/kafka-versions.yaml");
+        return testKafkaVersions.stream().filter(TestKafkaVersion::isDefault).collect(Collectors.toList()).get(0);
     }
 
     @BeforeEach
