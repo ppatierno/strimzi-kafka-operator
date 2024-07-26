@@ -1037,6 +1037,12 @@ public class KafkaRebalanceAssemblyOperator
             return Future.succeededFuture();
         }
 
+        KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(kafkaRebalance);
+        if (rebalanceAnnotation == KafkaRebalanceAnnotation.template) {
+            LOGGER.infoCr(reconciliation, "KafkaRebalance {} is a template configuration. Skipping it.", kafkaRebalance.getMetadata().getName());
+            return Future.succeededFuture();
+        }
+
         LOGGER.debugCr(reconciliation, "KafkaRebalance {} with status [{}] and {}={}",
                 kafkaRebalance.getMetadata().getName(),
                 kafkaRebalance.getStatus() != null ? rebalanceStateConditionType(kafkaRebalance.getStatus()) : null,
