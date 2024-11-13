@@ -259,6 +259,7 @@ public class CruiseControl extends AbstractModel implements SupportsMetrics, Sup
     public void checkGoals(CruiseControlConfiguration configuration) {
         // If self healing goals are defined then these take precedence.
         // Right now, self.healing.goals must either be null or an empty list
+        /*
         if (configuration.getConfigOption(CruiseControlConfigurationParameters.SELF_HEALING_CONFIG_KEY.toString()) != null) {
             String selfHealingGoalsString = configuration.getConfigOption(CruiseControlConfigurationParameters.SELF_HEALING_CONFIG_KEY.toString());
             List<String> selfHealingGoals = Arrays.asList(selfHealingGoalsString.split("\\s*,\\s*"));
@@ -267,6 +268,7 @@ public class CruiseControl extends AbstractModel implements SupportsMetrics, Sup
                         CruiseControlConfigurationParameters.SELF_HEALING_CONFIG_KEY + " config");
             }
         }
+        */
 
         // If no anomaly detection goals have been defined by the user, the defaults defined in Cruise Control will be used.
         String anomalyGoalsString = configuration.getConfigOption(CruiseControlConfigurationParameters.ANOMALY_DETECTION_CONFIG_KEY.toString(), CRUISE_CONTROL_DEFAULT_ANOMALY_DETECTION_GOALS);
