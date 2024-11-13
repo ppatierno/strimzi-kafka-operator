@@ -203,6 +203,7 @@
         <module>kafka-init</module>
         <module>certificate-manager</module>
         <module>systemtest</module>
+        <module>cruise-control-notifier</module>
     </modules>
 
     <dependencyManagement>

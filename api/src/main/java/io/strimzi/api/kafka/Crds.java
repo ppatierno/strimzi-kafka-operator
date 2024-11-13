@@ -28,6 +28,8 @@ import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolList;
 import io.strimzi.api.kafka.model.podset.StrimziPodSet;
 import io.strimzi.api.kafka.model.podset.StrimziPodSetList;
+import io.strimzi.api.kafka.model.rebalance.KafkaAnomaly;
+import io.strimzi.api.kafka.model.rebalance.KafkaAnomalyList;
 import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
 import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceList;
 import io.strimzi.api.kafka.model.topic.KafkaTopic;
@@ -56,13 +58,14 @@ public class Crds {
         KafkaMirrorMaker2.class,
         KafkaRebalance.class,
         StrimziPodSet.class,
-        KafkaNodePool.class
+        KafkaNodePool.class,
+        KafkaAnomaly.class
     };
 
     private Crds() {
     }
 
-    @SuppressWarnings({"checkstyle:JavaNCSS"})
+    @SuppressWarnings({"checkstyle:JavaNCSS", "checkstyle:MethodLength"})
     private static CustomResourceDefinition crd(Class<? extends CustomResource> cls) {
         String scope, plural, singular, group, kind, listKind;
         List<String> versions;
@@ -157,6 +160,15 @@ public class Crds {
             kind = KafkaNodePool.RESOURCE_KIND;
             listKind = KafkaNodePool.RESOURCE_LIST_KIND;
             versions = KafkaNodePool.VERSIONS;
+            status = new CustomResourceSubresourceStatus();
+        } else if (cls.equals(KafkaAnomaly.class)) {
+            scope = KafkaAnomaly.SCOPE;
+            plural = KafkaAnomaly.RESOURCE_PLURAL;
+            singular = KafkaAnomaly.RESOURCE_SINGULAR;
+            group = KafkaAnomaly.RESOURCE_GROUP;
+            kind = KafkaAnomaly.RESOURCE_KIND;
+            listKind = KafkaAnomaly.RESOURCE_LIST_KIND;
+            versions = KafkaAnomaly.VERSIONS;
             status = new CustomResourceSubresourceStatus();
         } else {
             throw new RuntimeException();
@@ -276,6 +288,14 @@ public class Crds {
 
     public static MixedOperation<KafkaNodePool, KafkaNodePoolList, Resource<KafkaNodePool>> kafkaNodePoolOperation(KubernetesClient client) {
         return client.resources(KafkaNodePool.class, KafkaNodePoolList.class);
+    }
+
+    public static CustomResourceDefinition kafkaAnomaly() {
+        return crd(KafkaAnomaly.class);
+    }
+
+    public static MixedOperation<KafkaAnomaly, KafkaAnomalyList, Resource<KafkaAnomaly>> kafkaAnomalyOperation(KubernetesClient client) {
+        return client.resources(KafkaAnomaly.class, KafkaAnomalyList.class);
     }
 
     public static <T extends CustomResource, L extends DefaultKubernetesResourceList<T>> MixedOperation<T, L, Resource<T>>

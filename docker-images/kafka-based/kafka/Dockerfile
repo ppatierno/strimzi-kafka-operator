@@ -109,6 +109,7 @@ ENV CRUISE_CONTROL_HOME=/opt/cruise-control
 RUN mkdir $CRUISE_CONTROL_HOME
 COPY tmp/cc/ ${CRUISE_CONTROL_HOME}/libs/
 COPY ./cruise-control-scripts $CRUISE_CONTROL_HOME
+COPY tmp/cc-notifier/ ${CRUISE_CONTROL_HOME}/libs/
 
 WORKDIR $KAFKA_HOME
 
