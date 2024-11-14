@@ -19,11 +19,14 @@ import com.linkedin.kafka.cruisecontrol.detector.notifier.SelfHealingNotifier;
 //import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.strimzi.api.ResourceAnnotations;
 import io.strimzi.api.ResourceLabels;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.model.kafka.Kafka;
 import io.strimzi.api.kafka.model.rebalance.KafkaAnomaly;
 import io.strimzi.api.kafka.model.rebalance.KafkaAnomalyBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 import java.util.Map;
@@ -32,6 +35,8 @@ import java.util.Map;
  * Strimzi Cruise Control notifier
  */
 public class StrimziNotifier extends SelfHealingNotifier {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(StrimziNotifier.class);
 
     /**
      * Default namespace for the notifier to look at Strimzi resources
@@ -62,67 +67,67 @@ public class StrimziNotifier extends SelfHealingNotifier {
 
     @Override
     public AnomalyNotificationResult onGoalViolation(GoalViolations goalViolations) {
-        System.out.println("**** onGoalViolation anomalyId = " + goalViolations.anomalyId());
+        LOGGER.info("**** onGoalViolation anomalyId = {}", goalViolations.anomalyId());
         return this.updateAction(goalViolations, super.onGoalViolation(goalViolations));
     }
 
     @Override
     public AnomalyNotificationResult onBrokerFailure(BrokerFailures brokerFailures) {
-        System.out.println("**** onBrokerFailure anomalyId = " + brokerFailures.anomalyId());
+        LOGGER.info("**** onBrokerFailure anomalyId = {}", brokerFailures.anomalyId());
         return this.updateAction(brokerFailures, super.onBrokerFailure(brokerFailures));
     }
 
     @Override
     public AnomalyNotificationResult onMetricAnomaly(KafkaMetricAnomaly kafkaMetricAnomaly) {
-        System.out.println("**** onMetricAnomaly");
+        LOGGER.info("**** onMetricAnomaly");
         return AnomalyNotificationResult.ignore();
     }
 
     @Override
     public AnomalyNotificationResult onTopicAnomaly(TopicAnomaly topicAnomaly) {
-        System.out.println("**** onTopicAnomaly anomalyId = " + topicAnomaly.anomalyId());
+        LOGGER.info("**** onTopicAnomaly anomalyId = {}", topicAnomaly.anomalyId());
         return this.updateAction(topicAnomaly, super.onTopicAnomaly(topicAnomaly));
     }
 
     @Override
     public AnomalyNotificationResult onMaintenanceEvent(MaintenanceEvent maintenanceEvent) {
-        System.out.println("**** onMaintenanceEvent");
+        LOGGER.info("**** onMaintenanceEvent");
         return AnomalyNotificationResult.ignore();
     }
 
     @Override
     public AnomalyNotificationResult onDiskFailure(DiskFailures diskFailures) {
-        System.out.println("**** onDiskFailure anomalyId = " + diskFailures.anomalyId());
+        LOGGER.info("**** onDiskFailure anomalyId = {}", diskFailures.anomalyId());
         return this.updateAction(diskFailures, super.onDiskFailure(diskFailures));
     }
 
     @Override
     public Map<AnomalyType, Boolean> selfHealingEnabled() {
-        System.out.println("**** selfHealingEnabled");
+        LOGGER.info("**** selfHealingEnabled");
         return super.selfHealingEnabled();
     }
 
     @Override
     public boolean setSelfHealingFor(AnomalyType anomalyType, boolean b) {
-        System.out.println("**** setSelfHealingFor");
+        LOGGER.info("**** setSelfHealingFor");
         return super.setSelfHealingFor(anomalyType, b);
     }
 
     @Override
     public Map<AnomalyType, Float> selfHealingEnabledRatio() {
-        System.out.println("**** selfHealingEnabledRatio");
+        LOGGER.info("**** selfHealingEnabledRatio");
         return super.selfHealingEnabledRatio();
     }
 
     @Override
     public long uptimeMs(long l) {
-        System.out.println("**** uptimeMs");
+        LOGGER.info("**** uptimeMs");
         return super.uptimeMs(l);
     }
 
     @Override
     public void configure(Map<String, ?> config) {
-        System.out.println("**** configure");
+        LOGGER.info("**** configure");
         this.namespace = config.get(NAMESPACE) == null ? DEFAULT_NAMESPACE : (String) config.get(NAMESPACE);
         if (config.get(CLUSTER) == null) {
             throw new IllegalArgumentException("No cluster specified");
@@ -152,7 +157,7 @@ public class StrimziNotifier extends SelfHealingNotifier {
                         .withSelfHealingStartTime(selfHealingStartTime)
                     .endSpec()
                     .build();
-            System.out.println("**** alert kafkaanomaly created");
+            LOGGER.info("**** alert kafkaanomaly created");
             Crds.kafkaAnomalyOperation(this.kubernetesClient).inNamespace(this.namespace).resource(kafkaAnomaly).create();
         } else {
             kafkaAnomaly = new KafkaAnomalyBuilder(kafkaAnomaly)
@@ -163,10 +168,10 @@ public class StrimziNotifier extends SelfHealingNotifier {
                         .withSelfHealingStartTime(selfHealingStartTime)
                     .endSpec()
                     .build();
-            System.out.println("**** alert kafkaanomaly updated");
+            LOGGER.info("**** alert kafkaanomaly updated");
             Crds.kafkaAnomalyOperation(this.kubernetesClient).inNamespace(this.namespace).resource(kafkaAnomaly).update();
         }
-        System.out.println("**** alert spec = " + kafkaAnomaly.getSpec());
+        LOGGER.info("**** alert spec = {}", kafkaAnomaly.getSpec());
 
         /*
         KafkaAnomalyType kafkaAnomalyType = ((KafkaAnomalyType) anomalyType);
@@ -176,7 +181,7 @@ public class StrimziNotifier extends SelfHealingNotifier {
                 "autoFixTriggered", Boolean.toString(autoFixTriggered),
                 "selfHealingStartTime", Long.toString(selfHealingStartTime)
         );
-        System.out.println("**** alert data = " + data);
+        LOGGER.info("**** alert data = " + data);
 
         // TODO: ConfigMap creation to be replaced with some KafkaAnomaly custom resource
         ConfigMap cm = this.kubernetesClient.configMaps().inNamespace(this.namespace).withName(resource).get();
@@ -187,17 +192,22 @@ public class StrimziNotifier extends SelfHealingNotifier {
                     .endMetadata()
                     .withData(data)
                     .build();
-            System.out.println("**** alert cm created");
+            LOGGER.info("**** alert cm created");
             this.kubernetesClient.configMaps().inNamespace(this.namespace).resource(cm).create();
         } else {
             cm.setData(data);
-            System.out.println("**** alert cm updated");
+            LOGGER.info("**** alert cm updated");
             this.kubernetesClient.configMaps().inNamespace(this.namespace).resource(cm).update();
         }
         */
     }
 
     private AnomalyNotificationResult updateAction(Anomaly anomaly, AnomalyNotificationResult anomalyNotificationResult) {
+        Kafka kafka = Crds.kafkaOperation(this.kubernetesClient).inNamespace(this.namespace).withName(this.cluster).get();
+        String anno = kafka.getMetadata().getAnnotations().get(ResourceAnnotations.ANNO_STRIMZI_IO_SELF_HEALING_PAUSED);
+        boolean isSelfHealingPause = anno != null ? Boolean.parseBoolean(anno) : false;
+        LOGGER.info("**** isSelfHealingPause = {}", isSelfHealingPause);
+
         KafkaAnomalyType kafkaAnomalyType = ((KafkaAnomalyType) anomaly.anomalyType());
         String resource = this.anomalyResourceName(kafkaAnomalyType);
 
@@ -205,11 +215,11 @@ public class StrimziNotifier extends SelfHealingNotifier {
         if (kafkaAnomaly != null) {
             kafkaAnomaly = new KafkaAnomalyBuilder(kafkaAnomaly)
                     .editSpec()
-                        .withAction(anomalyNotificationResult.action().name())
+                        .withAction(isSelfHealingPause ? AnomalyNotificationResult.ignore().action().name() : anomalyNotificationResult.action().name())
                     .endSpec()
                     .build();
             Crds.kafkaAnomalyOperation(this.kubernetesClient).inNamespace(this.namespace).resource(kafkaAnomaly).update();
-            System.out.println("**** updateAction spec = " + kafkaAnomaly.getSpec());
+            LOGGER.info("**** updateAction spec = {}", kafkaAnomaly.getSpec());
         }
         /*
         ConfigMap cm = this.kubernetesClient.configMaps().inNamespace(this.namespace).withName(resource).get();
@@ -218,14 +228,9 @@ public class StrimziNotifier extends SelfHealingNotifier {
             data.put("action", anomalyNotificationResult.action().name());
             cm.setData(data);
             this.kubernetesClient.configMaps().inNamespace(this.namespace).resource(cm).update();
-            System.out.println("**** updateAction data = " + data);
+            LOGGER.info("**** updateAction data = " + data);
         }
         */
-
-        Kafka kafka = Crds.kafkaOperation(this.kubernetesClient).inNamespace(this.namespace).withName(this.cluster).get();
-        String anno = kafka.getMetadata().getAnnotations().get("strimzi.io/self-healing-pause");
-        boolean isSelfHealingPause = anno != null ? Boolean.parseBoolean(anno) : false;
-        System.out.println("**** isSelfHealingPause = " + isSelfHealingPause);
 
         return isSelfHealingPause ? AnomalyNotificationResult.ignore() : anomalyNotificationResult;
     }
