@@ -133,4 +133,10 @@ public class ResourceAnnotations {
      * If missing or with an invalid value, the cluster is assumed to be ZooKeeper-based
      */
     public static final String ANNO_STRIMZI_IO_KRAFT = STRIMZI_DOMAIN + "kraft";
+
+    /**
+     * Annotation for pausing the self-healing feature enabled on Cruise Control.
+     * When paused, all anomalies detected are just ignored otherwise their fix is requested.
+     */
+    public static final String ANNO_STRIMZI_IO_SELF_HEALING_PAUSED = STRIMZI_DOMAIN + "self-healing-paused";
 }
