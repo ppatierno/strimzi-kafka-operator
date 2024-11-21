@@ -4762,6 +4762,9 @@ Used in: xref:type-KafkaAnomaly-{context}[`KafkaAnomaly`]
 |selfHealingStartTime
 |integer
 |SelfHealingStartTime.
+|details
+|string
+|Details.
 |action
 |string
 |Action.

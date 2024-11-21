@@ -600,6 +600,7 @@ public class ResourceUtils {
                 mock(CrdOperator.class),
                 mock(CrdOperator.class),
                 mock(CrdOperator.class),
+                mock(CrdOperator.class),
                 mock(StrimziPodSetOperator.class),
                 mock(StorageClassOperator.class),
                 mock(NodeOperator.class),

@@ -6,6 +6,7 @@ package io.strimzi.cruisecontrol.notifier;
 
 import com.linkedin.cruisecontrol.detector.Anomaly;
 import com.linkedin.cruisecontrol.detector.AnomalyType;
+import com.linkedin.cruisecontrol.detector.metricanomaly.MetricAnomaly;
 import com.linkedin.kafka.cruisecontrol.detector.BrokerFailures;
 import com.linkedin.kafka.cruisecontrol.detector.DiskFailures;
 import com.linkedin.kafka.cruisecontrol.detector.GoalViolations;
@@ -15,8 +16,6 @@ import com.linkedin.kafka.cruisecontrol.detector.TopicAnomaly;
 import com.linkedin.kafka.cruisecontrol.detector.notifier.AnomalyNotificationResult;
 import com.linkedin.kafka.cruisecontrol.detector.notifier.KafkaAnomalyType;
 import com.linkedin.kafka.cruisecontrol.detector.notifier.SelfHealingNotifier;
-//import io.fabric8.kubernetes.api.model.ConfigMap;
-//import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.strimzi.api.ResourceAnnotations;
@@ -155,6 +154,7 @@ public class StrimziNotifier extends SelfHealingNotifier {
                         .withAnomalyType(kafkaAnomalyType.name())
                         .withAutoFixTriggered(autoFixTriggered)
                         .withSelfHealingStartTime(selfHealingStartTime)
+                        .withDetails(this.anomalyDetails(anomaly))
                     .endSpec()
                     .build();
             LOGGER.info("**** alert kafkaanomaly created");
@@ -166,40 +166,13 @@ public class StrimziNotifier extends SelfHealingNotifier {
                         .withAnomalyType(kafkaAnomalyType.name())
                         .withAutoFixTriggered(autoFixTriggered)
                         .withSelfHealingStartTime(selfHealingStartTime)
+                        .withDetails(this.anomalyDetails(anomaly))
                     .endSpec()
                     .build();
             LOGGER.info("**** alert kafkaanomaly updated");
             Crds.kafkaAnomalyOperation(this.kubernetesClient).inNamespace(this.namespace).resource(kafkaAnomaly).update();
         }
         LOGGER.info("**** alert spec = {}", kafkaAnomaly.getSpec());
-
-        /*
-        KafkaAnomalyType kafkaAnomalyType = ((KafkaAnomalyType) anomalyType);
-        Map<String, String> data = Map.of(
-                "anomalyId", anomaly.anomalyId(),
-                "anomalyType", kafkaAnomalyType.name(),
-                "autoFixTriggered", Boolean.toString(autoFixTriggered),
-                "selfHealingStartTime", Long.toString(selfHealingStartTime)
-        );
-        LOGGER.info("**** alert data = " + data);
-
-        // TODO: ConfigMap creation to be replaced with some KafkaAnomaly custom resource
-        ConfigMap cm = this.kubernetesClient.configMaps().inNamespace(this.namespace).withName(resource).get();
-        if (cm == null) {
-            cm = new ConfigMapBuilder()
-                    .withNewMetadata()
-                        .withName(resource)
-                    .endMetadata()
-                    .withData(data)
-                    .build();
-            LOGGER.info("**** alert cm created");
-            this.kubernetesClient.configMaps().inNamespace(this.namespace).resource(cm).create();
-        } else {
-            cm.setData(data);
-            LOGGER.info("**** alert cm updated");
-            this.kubernetesClient.configMaps().inNamespace(this.namespace).resource(cm).update();
-        }
-        */
     }
 
     private AnomalyNotificationResult updateAction(Anomaly anomaly, AnomalyNotificationResult anomalyNotificationResult) {
@@ -221,21 +194,25 @@ public class StrimziNotifier extends SelfHealingNotifier {
             Crds.kafkaAnomalyOperation(this.kubernetesClient).inNamespace(this.namespace).resource(kafkaAnomaly).update();
             LOGGER.info("**** updateAction spec = {}", kafkaAnomaly.getSpec());
         }
-        /*
-        ConfigMap cm = this.kubernetesClient.configMaps().inNamespace(this.namespace).withName(resource).get();
-        if (cm != null) {
-            Map<String, String> data = cm.getData();
-            data.put("action", anomalyNotificationResult.action().name());
-            cm.setData(data);
-            this.kubernetesClient.configMaps().inNamespace(this.namespace).resource(cm).update();
-            LOGGER.info("**** updateAction data = " + data);
-        }
-        */
 
         return isSelfHealingPause ? AnomalyNotificationResult.ignore() : anomalyNotificationResult;
     }
 
     private String anomalyResourceName(KafkaAnomalyType kafkaAnomalyType) {
         return this.cluster + "-" + kafkaAnomalyType.name().toLowerCase(Locale.ENGLISH).replace("_", "-");
+    }
+
+    private String anomalyDetails(Anomaly anomaly) {
+        KafkaAnomalyType kafkaAnomalyType = ((KafkaAnomalyType) anomaly.anomalyType());
+        String details;
+        switch (kafkaAnomalyType) {
+            case BROKER_FAILURE -> details = ((BrokerFailures) anomaly).failedBrokers().toString();
+            case DISK_FAILURE -> details = ((DiskFailures) anomaly).failedDisks().toString();
+            case TOPIC_ANOMALY -> details = ((TopicAnomaly) anomaly).toString();
+            case METRIC_ANOMALY -> details = ((MetricAnomaly) anomaly).description();
+            case GOAL_VIOLATION -> details = ((GoalViolations) anomaly).violatedGoalsByFixability().toString();
+            default -> details = anomaly.toString();
+        }
+        return details;
     }
 }

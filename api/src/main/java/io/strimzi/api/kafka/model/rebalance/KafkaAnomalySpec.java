@@ -19,7 +19,7 @@ import lombok.ToString;
         builderPackage = Constants.FABRIC8_KUBERNETES_API
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonPropertyOrder({ "anomalyId", "anomalyType", "goals", "autoFixTriggered", "selfHealingStartTime", "action" })
+@JsonPropertyOrder({ "anomalyId", "anomalyType", "goals", "autoFixTriggered", "selfHealingStartTime", "details", "action" })
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 public class KafkaAnomalySpec extends Spec {
@@ -28,6 +28,7 @@ public class KafkaAnomalySpec extends Spec {
     private String anomalyType;
     private boolean autoFixTriggered;
     private long selfHealingStartTime;
+    private String details;
     private String action;
 
     @Description("AnomalyId")
@@ -64,6 +65,15 @@ public class KafkaAnomalySpec extends Spec {
 
     public void setSelfHealingStartTime(long selfHealingStartTime) {
         this.selfHealingStartTime = selfHealingStartTime;
+    }
+
+    @Description("Details")
+    public String getDetails() {
+        return details;
+    }
+
+    public void setDetails(String details) {
+        this.details = details;
     }
 
     @Description("Action")
