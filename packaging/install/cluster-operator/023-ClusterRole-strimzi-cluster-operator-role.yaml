@@ -28,6 +28,7 @@ rules:
       - kafkabridges
       - kafkamirrormaker2s
       - kafkarebalances
+      - kafkaanomalies
     verbs:
       - get
       - list
@@ -46,6 +47,7 @@ rules:
       - kafkabridges/status
       - kafkamirrormaker2s/status
       - kafkarebalances/status
+      - kafkaanomalies/status
     verbs:
       - get
       - patch

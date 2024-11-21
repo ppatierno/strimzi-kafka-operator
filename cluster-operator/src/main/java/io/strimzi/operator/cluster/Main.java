@@ -10,6 +10,7 @@ import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.operator.cluster.leaderelection.LeaderElectionManager;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderFactory;
+import io.strimzi.operator.cluster.operator.assembly.KafkaAnomalyAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaBridgeAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaConnectAssemblyOperator;
@@ -149,6 +150,7 @@ public class Main {
         KafkaMirrorMaker2AssemblyOperator kafkaMirrorMaker2AssemblyOperator = null;
         KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator = null;
         KafkaRebalanceAssemblyOperator kafkaRebalanceAssemblyOperator = null;
+        KafkaAnomalyAssemblyOperator kafkaAnomalyAssemblyOperator = null;
 
         if (!config.isPodSetReconciliationOnly()) {
             OpenSslCertManager certManager = new OpenSslCertManager();
@@ -164,6 +166,7 @@ public class Main {
             kafkaMirrorMaker2AssemblyOperator = new KafkaMirrorMaker2AssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
             kafkaBridgeAssemblyOperator = new KafkaBridgeAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
             kafkaRebalanceAssemblyOperator = new KafkaRebalanceAssemblyOperator(vertx, resourceOperatorSupplier, config);
+            kafkaAnomalyAssemblyOperator = new KafkaAnomalyAssemblyOperator(vertx, resourceOperatorSupplier, config);
         }
 
         List<Future<String>> futures = new ArrayList<>(config.getNamespaces().size());
@@ -177,6 +180,7 @@ public class Main {
                     kafkaMirrorMaker2AssemblyOperator,
                     kafkaBridgeAssemblyOperator,
                     kafkaRebalanceAssemblyOperator,
+                    kafkaAnomalyAssemblyOperator,
                     resourceOperatorSupplier);
             vertx.deployVerticle(operator,
                 res -> {

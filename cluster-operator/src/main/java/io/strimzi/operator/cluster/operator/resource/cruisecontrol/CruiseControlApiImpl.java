@@ -74,8 +74,12 @@ public class CruiseControlApiImpl implements CruiseControlApi {
     }
 
     @Override
-    public CompletableFuture<CruiseControlResponse> getCruiseControlState(Reconciliation reconciliation, String host, int port, boolean verbose) {
-        String path = new PathBuilder(CruiseControlEndpoints.STATE)
+    public CompletableFuture<CruiseControlResponse> getCruiseControlState(Reconciliation reconciliation, String host, int port, boolean verbose, String substates) {
+        PathBuilder pathBuilder = new PathBuilder(CruiseControlEndpoints.STATE);
+        if (substates != null) {
+            pathBuilder.withParameter(CruiseControlParameters.SUBSTATES, substates);
+        }
+        String path = pathBuilder
                 .withParameter(CruiseControlParameters.VERBOSE, String.valueOf(verbose))
                 .withParameter(CruiseControlParameters.JSON, "true")
                 .build();

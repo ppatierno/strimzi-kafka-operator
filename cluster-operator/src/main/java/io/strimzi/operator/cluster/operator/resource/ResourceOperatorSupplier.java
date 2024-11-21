@@ -18,6 +18,8 @@ import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2;
 import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2List;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolList;
+import io.strimzi.api.kafka.model.rebalance.KafkaAnomaly;
+import io.strimzi.api.kafka.model.rebalance.KafkaAnomalyList;
 import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
 import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceList;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
@@ -152,6 +154,11 @@ public class ResourceOperatorSupplier {
      * KafkaNodePool CR operator
      */
     public final CrdOperator<KubernetesClient, KafkaNodePool, KafkaNodePoolList> kafkaNodePoolOperator;
+
+    /**
+     * KafkaAnomaly CR operator
+     */
+    public final CrdOperator<KubernetesClient, KafkaAnomaly, KafkaAnomalyList> kafkaAnomalyOperator;
 
     /**
      * Strimzi Pod Set operator
@@ -345,6 +352,7 @@ public class ResourceOperatorSupplier {
                 new CrdOperator<>(vertx, client, KafkaMirrorMaker2.class, KafkaMirrorMaker2List.class, KafkaMirrorMaker2.RESOURCE_KIND),
                 new CrdOperator<>(vertx, client, KafkaRebalance.class, KafkaRebalanceList.class, KafkaRebalance.RESOURCE_KIND),
                 new CrdOperator<>(vertx, client, KafkaNodePool.class, KafkaNodePoolList.class, KafkaNodePool.RESOURCE_KIND),
+                new CrdOperator<>(vertx, client, KafkaAnomaly.class, KafkaAnomalyList.class, KafkaAnomaly.RESOURCE_KIND),
                 new StrimziPodSetOperator(vertx, client),
                 new StorageClassOperator(vertx, client),
                 new NodeOperator(vertx, client),
@@ -387,6 +395,7 @@ public class ResourceOperatorSupplier {
      * @param mirrorMaker2Operator                  KafkaMirrorMaker2 operator
      * @param kafkaRebalanceOperator                KafkaRebalance operator
      * @param kafkaNodePoolOperator                 kafkaNodePool operator
+     * @param kafkaAnomalyOperator                  KafkaAnomaly operator
      * @param strimziPodSetOperator                 StrimziPodSet operator
      * @param storageClassOperator                  StorageClass operator
      * @param nodeOperator                          Node operator
@@ -426,6 +435,7 @@ public class ResourceOperatorSupplier {
                                     CrdOperator<KubernetesClient, KafkaMirrorMaker2, KafkaMirrorMaker2List> mirrorMaker2Operator,
                                     CrdOperator<KubernetesClient, KafkaRebalance, KafkaRebalanceList> kafkaRebalanceOperator,
                                     CrdOperator<KubernetesClient, KafkaNodePool, KafkaNodePoolList> kafkaNodePoolOperator,
+                                    CrdOperator<KubernetesClient, KafkaAnomaly, KafkaAnomalyList> kafkaAnomalyOperator,
                                     StrimziPodSetOperator strimziPodSetOperator,
                                     StorageClassOperator storageClassOperator,
                                     NodeOperator nodeOperator,
@@ -464,6 +474,7 @@ public class ResourceOperatorSupplier {
         this.mirrorMaker2Operator = mirrorMaker2Operator;
         this.kafkaRebalanceOperator = kafkaRebalanceOperator;
         this.kafkaNodePoolOperator = kafkaNodePoolOperator;
+        this.kafkaAnomalyOperator = kafkaAnomalyOperator;
         this.strimziPodSetOperator = strimziPodSetOperator;
         this.nodeOperator = nodeOperator;
         this.zkScalerProvider = zkScalerProvider;

@@ -80,7 +80,7 @@ public class CruiseControlClientTest {
         cruiseControlServer.setupCCStateResponse();
 
         CruiseControlApi client = cruiseControlClientProvider();
-        client.getCruiseControlState(Reconciliation.DUMMY_RECONCILIATION, HOST, cruiseControlPort, false)
+        client.getCruiseControlState(Reconciliation.DUMMY_RECONCILIATION, HOST, cruiseControlPort, false, null)
                 .whenComplete((result, ex) -> assertThat(result.getJson().get("ExecutorState"),
                         hasEntry("state", "NO_TASK_IN_PROGRESS"))).join();
     }

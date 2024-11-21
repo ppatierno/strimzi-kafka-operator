@@ -67,6 +67,11 @@ import java.util.Map;
                 name = "Action",
                 description = "Action result",
                 jsonPath = ".spec.action",
+                type = "string"),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Status",
+                description = "Status progress",
+                jsonPath = ".status.progress",
                 type = "string")
         }
     )
