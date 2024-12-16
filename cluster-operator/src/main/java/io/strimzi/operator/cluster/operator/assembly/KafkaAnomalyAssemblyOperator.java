@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -30,9 +31,9 @@ import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.core.json.JsonObject;
 
 import java.util.Map;
+import java.util.stream.StreamSupport;
 
 import static io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApiImpl.HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS;
 
@@ -150,26 +151,26 @@ public class KafkaAnomalyAssemblyOperator
                                                 // query anomaly detector and then executor endpoints
                                                 return VertxUtil.completableFutureToVertxFuture(apiClient.getCruiseControlState(reconciliation, cruiseControlHost(clusterName, clusterNamespace), cruiseControlPort, false, "anomaly_detector"))
                                                         .compose(cruiseControlResponse -> {
-                                                            JsonObject jsonAnomalyDetectorState = this.getAnomalyStatus(kafkaAnomaly, cruiseControlResponse.getJson().getJsonObject("AnomalyDetectorState"));
+                                                            JsonNode jsonAnomalyDetectorState = this.getAnomalyStatus(kafkaAnomaly, cruiseControlResponse.getJson().get("AnomalyDetectorState"));
                                                             LOGGER.infoCr(reconciliation, "AnomalyDetectorState = {}", jsonAnomalyDetectorState);
-                                                            String anomalyStatus = jsonAnomalyDetectorState.getString("status");
+                                                            String anomalyStatus = jsonAnomalyDetectorState.asText("status");
                                                             if ("FIX_STARTED".equals(anomalyStatus)) {
                                                                 LOGGER.infoCr(reconciliation, "**** FIX_STARTED going to call executor endpoint");
                                                                 return VertxUtil.completableFutureToVertxFuture(apiClient.getCruiseControlState(reconciliation, cruiseControlHost(clusterName, clusterNamespace), cruiseControlPort, false, "executor"))
                                                                         .compose(cruiseControlResponse1 -> {
-                                                                            JsonObject jsonExecutorState = cruiseControlResponse1.getJson().getJsonObject("ExecutorState");
+                                                                            JsonNode jsonExecutorState = cruiseControlResponse1.getJson().get("ExecutorState");
                                                                             LOGGER.infoCr(reconciliation, "ExecutorState = {}", jsonExecutorState);
                                                                             // check the ongoing task is related to the anomaly
-                                                                            if (kafkaAnomaly.getSpec().getAnomalyId().equals(jsonExecutorState.getString("triggeredSelfHealingTaskId"))) {
-                                                                                kafkaAnomalyStatus.setProgress(jsonAnomalyDetectorState.getString("status") + " : " +
-                                                                                        jsonExecutorState.getString("state"));
+                                                                            if (kafkaAnomaly.getSpec().getAnomalyId().equals(jsonExecutorState.asText("triggeredSelfHealingTaskId"))) {
+                                                                                kafkaAnomalyStatus.setProgress(jsonAnomalyDetectorState.asText("status") + " : " +
+                                                                                        jsonExecutorState.asText("state"));
                                                                             } else {
                                                                                 kafkaAnomalyStatus.setProgress("FIXED");
                                                                             }
                                                                             return Future.succeededFuture(kafkaAnomalyStatus);
                                                                         });
                                                             } else {
-                                                                kafkaAnomalyStatus.setProgress(jsonAnomalyDetectorState.getString("status"));
+                                                                kafkaAnomalyStatus.setProgress(jsonAnomalyDetectorState.asText("status"));
                                                                 return Future.succeededFuture(kafkaAnomalyStatus);
                                                             }
                                                         });
@@ -179,7 +180,7 @@ public class KafkaAnomalyAssemblyOperator
                 });
     }
 
-    private JsonObject getAnomalyStatus(KafkaAnomaly kafkaAnomaly, JsonObject anomalyDetectorState) {
+    private JsonNode getAnomalyStatus(KafkaAnomaly kafkaAnomaly, JsonNode anomalyDetectorState) {
         String anomalies = null;
         switch (kafkaAnomaly.getSpec().getAnomalyType()) {
             case "BROKER_FAILURE" -> anomalies = "recentBrokerFailures";
@@ -188,10 +189,10 @@ public class KafkaAnomalyAssemblyOperator
             case "TOPIC_ANOMALY" -> anomalies = "recentTopicAnomalies";
             case "METRIC_ANOMALY" -> anomalies = "recentMetricAnomalies";
         }
-        JsonObject json = (JsonObject) anomalyDetectorState.getJsonArray(anomalies).stream()
-                .filter(o -> {
-                    JsonObject anomaly = (JsonObject) o;
-                    return anomaly.getString("anomalyId").equals(kafkaAnomaly.getSpec().getAnomalyId());
+
+        JsonNode json = StreamSupport.stream(anomalyDetectorState.get(anomalies).spliterator(), false)
+                .filter(anomaly -> {
+                    return anomaly.asText("anomalyId").equals(kafkaAnomaly.getSpec().getAnomalyId());
                 })
                 .findFirst()
                 .get();
