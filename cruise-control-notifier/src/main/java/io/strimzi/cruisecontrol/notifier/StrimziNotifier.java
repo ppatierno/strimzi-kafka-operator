@@ -102,25 +102,25 @@ public class StrimziNotifier extends SelfHealingNotifier {
 
     @Override
     public Map<AnomalyType, Boolean> selfHealingEnabled() {
-        LOGGER.info("**** selfHealingEnabled");
+        //LOGGER.info("**** selfHealingEnabled");
         return super.selfHealingEnabled();
     }
 
     @Override
     public boolean setSelfHealingFor(AnomalyType anomalyType, boolean b) {
-        LOGGER.info("**** setSelfHealingFor");
+        //LOGGER.info("**** setSelfHealingFor");
         return super.setSelfHealingFor(anomalyType, b);
     }
 
     @Override
     public Map<AnomalyType, Float> selfHealingEnabledRatio() {
-        LOGGER.info("**** selfHealingEnabledRatio");
+        //LOGGER.info("**** selfHealingEnabledRatio");
         return super.selfHealingEnabledRatio();
     }
 
     @Override
     public long uptimeMs(long l) {
-        LOGGER.info("**** uptimeMs");
+        //LOGGER.info("**** uptimeMs");
         return super.uptimeMs(l);
     }
 
