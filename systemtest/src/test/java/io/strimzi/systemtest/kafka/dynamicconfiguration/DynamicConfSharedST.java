@@ -184,7 +184,7 @@ public class DynamicConfSharedST extends AbstractST {
             // skipping these configuration exceptions
             testCases.remove("ssl.cipher.suites");
 
-            // skipping these configuration
+            // from Kafka 4.x if ELR is enabled on the cluster we can't change this config anymore, so skipping it
             testCases.remove("min.insync.replicas");
         });
 
