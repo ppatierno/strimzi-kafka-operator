@@ -51,7 +51,8 @@ public class KafkaConfigurationDiff extends AbstractJsonDiff {
     public static final Pattern IGNORABLE_PROPERTIES_PATTERN = Pattern.compile(
             "^(broker\\.id"
             + "|advertised\\.listeners"
-            + "|broker\\.rack)$");
+            + "|broker\\.rack"
+            + "|controller\\.quorum\\.bootstrap\\.servers)$");
 
     /**
      * Controller configuration options to skip for broker only node
@@ -78,6 +79,9 @@ public class KafkaConfigurationDiff extends AbstractJsonDiff {
             "controlled.shutdown.retry.backoff.ms",
             "controller.listener.names",
             "controller.quorum.append.linger.ms",
+            // TODO: explain/doc that this config is not here because even if READ_ONLY, nodes don't need to roll when controller bootstrap changes
+            //       it's defined as READ_ONLY because it's needed only at startup time so wouldn't make sense to define is as DYNAMIC in Kafka
+            //"controller.quorum.bootstrap.servers",
             "controller.quorum.election.backoff.max.ms",
             "controller.quorum.election.timeout.ms",
             "controller.quorum.fetch.timeout.ms",

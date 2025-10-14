@@ -5975,6 +5975,18 @@ spec:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
                   description: The current security configuration of the Kafka cluster.
+                controllers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        description: The node ID of the controller.
+                      directoryId:
+                        type: string
+                        description: The directory ID of the controller used for KRaft quorum management.
+                  description: List of controller nodes with their IDs and directory IDs. Used for KRaft quorum management and disaster recovery.
               description: The status of the Kafka cluster.
           required:
             - spec

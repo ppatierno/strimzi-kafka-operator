@@ -37,6 +37,7 @@ public class KafkaAgentClient {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final String BROKER_STATE_REST_PATH = "/v1/broker-state/";
+    private static final String DIRECTORY_ID_REST_PATH = "/v1/directory-id/";
     private static final int KAFKA_AGENT_HTTPS_PORT = 8443;
     // Bounds the connect and full HTTP request lifecycle so that a broker which accepts the TCP connection but
     // never produces a response (e.g. alive but stuck on IO) cannot block the KafkaRoller's single-threaded
@@ -161,5 +162,27 @@ public class KafkaAgentClient {
      */
     /* test */ ServiceAccountTokenService tokenService() {
         return ServiceAccountTokenService.getInstance();
+    }
+
+    /**
+     * Gets the directory ID from the pod's meta.properties file by sending HTTP request to the /v1/directory-id endpoint of the KafkaAgent
+     *
+     * @param podName   Name of the pod to interact with
+     * @return          Directory ID as string, or null if not available
+     */
+    public String getDirectoryId(String podName) {
+        String host = DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(cluster), podName);
+        try {
+            URI uri = new URI("https", null, host, KAFKA_AGENT_HTTPS_PORT, DIRECTORY_ID_REST_PATH, null, null);
+            DirectoryId dirId = MAPPER.readValue(doGet(uri), DirectoryId.class);
+            return dirId.directoryId();
+        } catch (JsonProcessingException e) {
+            LOGGER.warnCr(reconciliation, "Failed to parse directory ID", e);
+        } catch (URISyntaxException e) {
+            LOGGER.warnCr(reconciliation, "Failed to get directory ID due to invalid URI", e);
+        } catch (RuntimeException e) {
+            LOGGER.warnCr(reconciliation, "Failed to get directory ID from pod {}", podName, e);
+        }
+        return null;
     }
 }
