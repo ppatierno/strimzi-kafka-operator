@@ -256,6 +256,9 @@ public class KafkaReconciler {
                 .compose(i -> initClusterRoleBinding())
                 .compose(i -> kafkaRole())
                 .compose(i -> kafkaRoleBinding())
+                // by fixing https://issues.apache.org/jira/browse/KAFKA-19850, controllers unregistration can be done here
+                // before shutting down controllers even with autojoin enabled (they won't re-autojoin again)
+                .compose(i -> controllerUnregistration())
                 .compose(i -> scaleDown())
                 .compose(i -> updateNodePoolStatuses(kafkaStatus))
                 .compose(i -> listeners())
@@ -271,6 +274,11 @@ public class KafkaReconciler {
                 .compose(i -> clusterId(kafkaStatus))
                 .compose(i -> defaultKafkaQuotas())
                 .compose(i -> nodeUnregistration())
+                // By using the auto join feature within Apache Kafka 4.2.0, controllers registration is not needed anymore
+                .compose(i -> controllerRegistration())
+                // See above why controllers unregistration can be done before shut down controllers and not after (here)
+                //.compose(i -> controllerUnregistration())
+                //.compose(i -> reconcileKRaftQuorum())
                 .compose(i -> metadataVersion(kafkaStatus))
                 .compose(i -> deletePersistentClaims())
                 .compose(i -> sharedKafkaConfigurationCleanup())
@@ -1062,6 +1070,137 @@ public class KafkaReconciler {
         return unregistrationPromise.future();
     }
 
+    protected Future<Void> controllerUnregistration() {
+        /*
+        Set<NodeRef> scaledDownControllerNodes = new HashSet<>();
+        scaledDownControllerNodes.addAll(kafka.removedControllers());
+        scaledDownControllerNodes.addAll(kafka.usedToBeControllerNodes());
+        LOGGER.infoCr(reconciliation, "**** ScaledDown controllers = {}", scaledDownControllerNodes);
+        if (!scaledDownControllerNodes.isEmpty()) {
+            return KafkaNodeUnregistration.unregisterControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledDownControllerNodes);
+        } else {
+            return Future.succeededFuture();
+        }
+        */
+
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<Integer> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).map(NodeRef::nodeId).collect(Collectors.toSet());
+        Promise<Void> unregistrationPromise = Promise.promise();
+
+        KafkaNodeUnregistration.listQuorumVoters(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
+                .onSuccess(voters -> {
+
+                    // Identify controllers that need to be unregistered (scale down: in voters but not in desiredControllers)
+                    Set<Integer> controllersToUnregister = voters.stream()
+                            .filter(id -> !desiredControllers.contains(id))
+                            .collect(Collectors.toSet());
+
+                    if (!controllersToUnregister.isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "**** Controllers to unregister: {}", controllersToUnregister);
+
+                        KafkaNodeUnregistration.unregisterControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllersToUnregister)
+                                        .onComplete(res -> {
+                                            if (res.succeeded()) {
+                                                LOGGER.infoCr(reconciliation, "Kafka KRaft controllers {} were successfully unregistered from the Kafka cluster", controllersToUnregister);
+                                            } else {
+                                                // unregistration failed, we will retry on next reconciliation
+                                                LOGGER.warnCr(reconciliation, "Failed to unregister KRaft controllers {} from the Kafka cluster", controllersToUnregister);
+                                            }
+
+                                            // We complete the promise with success even if the unregistration failed as we do not want to
+                                            // fail the reconciliation.
+                                            unregistrationPromise.complete();
+                                        });
+
+                        unregistrationPromise.complete();
+                    } else {
+                        unregistrationPromise.complete();
+                    }
+                })
+                .onFailure(throwable -> {
+                    // listing KRaft quorum voters failed, we will retry on next reconciliation
+                    LOGGER.warnCr(reconciliation, "Failed to list KRaft quorum voters from the Kafka cluster", throwable);
+                    unregistrationPromise.complete();
+                });
+
+        return unregistrationPromise.future();
+    }
+
+    // TODO: to be removed if using Apache Kafka 4.2.0 where the controller quorum auto join feature is used
+    protected Future<Void> controllerRegistration() {
+        /*
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+
+        // gather all the added brokers across the entire cluster accounting all node pools
+        Set<NodeRef> addedControllers = kafka.addedNodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+
+        // if added controllers list contains all desired, it's a newly created cluster so there are no actual scaled up brokers.
+        // when added controllers list has fewer nodes than desired, it actually contains the new ones for scaling up
+        Set<NodeRef> scaledUpNewControllerNodes = addedControllers.containsAll(desiredControllers) ? Set.of() : addedControllers;
+
+        Set<NodeRef> scaledUpControllerNodes = new HashSet<>();
+        scaledUpControllerNodes.addAll(scaledUpNewControllerNodes);
+        scaledUpControllerNodes.addAll(kafka.becomingControllerNodes());
+
+        LOGGER.infoCr(reconciliation, "**** ScaledUp controllers = {}", scaledUpControllerNodes);
+        if (!scaledUpControllerNodes.isEmpty()) {
+            return KafkaNodeUnregistration.registerControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledUpControllerNodes);
+        } else {
+            return Future.succeededFuture();
+        }
+        */
+
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+        Promise<Void> registrationPromise = Promise.promise();
+
+        KafkaNodeUnregistration.listQuorumVoters(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
+                .onSuccess(voters -> {
+
+                    // Identify controllers that need to be registered (scale up: in controllersToReconcile but not in voters)
+                    Set<NodeRef> controllersToRegister = desiredControllers.stream()
+                            .filter(controller -> !voters.contains(controller.nodeId()))
+                            .collect(Collectors.toSet());
+
+                    if (!controllersToRegister.isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "**** Controllers to register: {}", controllersToRegister);
+
+                        KafkaNodeUnregistration.registerControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllersToRegister)
+                                .onComplete(res -> {
+                                    if (res.succeeded()) {
+                                        LOGGER.infoCr(reconciliation, "Kafka KRaft controllers {} were successfully registered from the Kafka cluster", controllersToRegister);
+                                    } else {
+                                        // registration failed, we will retry on next reconciliation
+                                        LOGGER.warnCr(reconciliation, "Failed to unregister KRaft controllers {} from the Kafka cluster", controllersToRegister);
+                                    }
+
+                                    // We complete the promise with success even if the registration failed as we do not want to
+                                    // fail the reconciliation.
+                                    registrationPromise.complete();
+                                });
+
+                    } else {
+                        registrationPromise.complete();
+                    }
+                })
+                .onFailure(throwable -> {
+                    // listing KRaft quorum voters failed, we will retry on next reconciliation
+                    LOGGER.warnCr(reconciliation, "Failed to list KRaft quorum voters from the Kafka cluster", throwable);
+                    registrationPromise.complete();
+                });
+
+        return registrationPromise.future();
+    }
+
+    /*
+    protected Future<Void> reconcileKRaftQuorum() {
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+        return KafkaNodeUnregistration.reconcileKRaftQuorum(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), desiredControllers);
+    }
+    */
+
     /**
      * Manages the KRaft metadata version
      *
@@ -1214,6 +1353,7 @@ public class KafkaReconciler {
     /* test */ Future<Void> updateKafkaStatus(KafkaStatus kafkaStatus) {
         kafkaStatus.setListeners(listenerReconciliationResults.listenerStatuses);
         kafkaStatus.setKafkaVersion(kafka.getKafkaVersion().version());
+        kafkaStatus.setInitialControllers(kafka.getInitialControllers());
 
         return Future.succeededFuture();
     }
