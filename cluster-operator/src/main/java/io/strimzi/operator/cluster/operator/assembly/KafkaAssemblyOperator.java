@@ -204,6 +204,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     // Copy the cluster security state if needed
                     status.setClusterSecurity(kafkaAssembly.getStatus().getClusterSecurity());
                 }
+
+                if (status.getControllers() == null
+                        && kafkaAssembly.getStatus().getControllers() != null)  {
+                    // Copy the controllers if needed for disaster recovery
+                    status.setControllers(kafkaAssembly.getStatus().getControllers());
+                }
             }
 
             if (reconcileResult.succeeded())    {
@@ -720,6 +726,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         // We copy the cluster security if set
         if (kafka.getStatus() != null && kafka.getStatus().getClusterSecurity() != null)  {
             status.setClusterSecurity(kafka.getStatus().getClusterSecurity());
+        }
+
+        // We copy the controllers if set (for disaster recovery from PVCs)
+        if (kafka.getStatus() != null && kafka.getStatus().getControllers() != null)  {
+            status.setControllers(kafka.getStatus().getControllers());
         }
 
         return status;

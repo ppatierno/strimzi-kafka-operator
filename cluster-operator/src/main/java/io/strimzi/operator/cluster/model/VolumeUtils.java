@@ -33,11 +33,13 @@ import io.strimzi.api.kafka.model.kafka.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.kafka.Storage;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.InvalidResourceException;
+//import org.apache.kafka.common.Uuid;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+//import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -536,6 +538,19 @@ public class VolumeUtils {
     }
 
     /**
+     * Returns the full path of the KRaft metadata log directory for a specific node,
+     * combining the base volume mount path with the node-specific suffix.
+     *
+     * @param storage   Storage configuration
+     * @param nodeId    Node ID
+     *
+     * @return  Full path of the KRaft metadata log directory for the given node
+     */
+    public static String kraftMetadataLogDir(Storage storage, int nodeId)  {
+        return kraftMetadataPath(storage) + "/kafka-log" + nodeId;
+    }
+
+    /**
      * Creates the mount path of the volume where the KRaft metadata should be stored. This is either the volume marked
      * for KRaft metadata or the volume with the lowest available ID. The actual metadata will be stored in a
      * subdirectory of this volume. The exact name of the subdirectory depends on the node ID.
@@ -565,4 +580,30 @@ public class VolumeUtils {
             throw new InvalidResourceException("Cannot find any data volumes for storing KRaft metadata.");
         }
     }
+
+    /*
+     * COMMENTED OUT - No longer using deterministic directory IDs, switched to random UUIDs
+     *
+     * Calculate the deterministic directory ID for a controller node based on namespace, cluster name, node ID and volume path.
+     * This uses the same algorithm as the initial controller setup to ensure consistency.
+     *
+     * @param namespace     Namespace
+     * @param cluster       Cluster name
+     * @param nodeId        Node ID
+     * @param pool          Kafka pool to which the node belongs
+     * @return  Deterministic directory ID as a string
+     */
+    /*
+    public static String makeDirectoryId(String namespace, String cluster, int nodeId, KafkaPool pool) {
+        String volumePath = kraftMetadataPath(pool.storage); //  --> /var/lib/kafka/disk-<diskid>/kafka-logs-<nodeId>
+        String deterministicInput = namespace + cluster + nodeId + volumePath;
+        UUID javaUuid = UUID.nameUUIDFromBytes(deterministicInput.getBytes());
+        Uuid kafkaUuid = new Uuid(
+                javaUuid.getMostSignificantBits(),
+                javaUuid.getLeastSignificantBits()
+        );
+        System.out.println("**** DirectoryId = " + kafkaUuid.toString() + " [namespace=" + namespace + ", cluster=" + cluster + ", nodeId=" + nodeId + ", volumePath=" + volumePath + "]");
+        return kafkaUuid.toString();
+    }
+    */
 }
