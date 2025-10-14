@@ -4953,6 +4953,8 @@ spec:
                             type: array
                             items:
                               type: integer
+                initialControllers:
+                  type: string
           required:
             - spec
     - name: v1beta2
@@ -12678,3 +12680,5 @@ spec:
                             type: array
                             items:
                               type: integer
+                initialControllers:
+                  type: string
