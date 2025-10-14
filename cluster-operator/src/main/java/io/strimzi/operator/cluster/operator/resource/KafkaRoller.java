@@ -17,6 +17,7 @@ import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.NodeRef;
 import io.strimzi.operator.cluster.model.RestartReason;
 import io.strimzi.operator.cluster.model.RestartReasons;
+import io.strimzi.operator.cluster.operator.assembly.KRaftQuorumReconciler;
 import io.strimzi.operator.cluster.operator.resource.events.KubernetesRestartEventPublisher;
 import io.strimzi.operator.cluster.operator.resource.kubernetes.PodOperator;
 import io.strimzi.operator.common.AdminClientProvider;
@@ -30,7 +31,10 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.clients.admin.AlterConfigsResult;
 import org.apache.kafka.clients.admin.Config;
+//import org.apache.kafka.clients.admin.QuorumInfo;
+//import org.apache.kafka.clients.admin.RaftVoterEndpoint;
 import org.apache.kafka.common.KafkaFuture;
+//import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.SslAuthenticationException;
 
@@ -802,6 +806,20 @@ public class KafkaRoller {
         LOGGER.debugCr(reconciliation, "Rolling pod {}", podName);
         await(restart(pod, restartContext), timeoutMs, e -> new UnforceableProblem("Error while trying to restart pod " + podName + " to become ready", e));
         awaitReadiness(pod, timeoutMs);
+
+        // Update controller quorum membership if directory ID changed (dynamic quorum with disk replacement)
+        try {
+            NodeRef nodeRef = nodes.stream()
+                .filter(n -> n.podName().equals(podName))
+                .findFirst()
+                .orElseThrow(() -> new FatalProblem("NodeRef not found for pod " + podName));
+
+            updateControllerQuorumMembership(nodeRef);
+        } catch (ForceableProblem e) {
+            // If quorum membership update fails, treat it as a fatal problem to stop rolling
+            // This ensures we don't continue rolling controllers when the quorum is in an inconsistent state
+            throw new FatalProblem("Failed to update controller quorum membership for pod " + podName, e);
+        }
     }
 
     private void awaitReadiness(Pod pod, long timeoutMs) throws FatalProblem, InterruptedException {
@@ -810,6 +828,147 @@ public class KafkaRoller {
         await(isReady(pod), timeoutMs, e -> new FatalProblem("Error while waiting for restarted pod " + podName + " to become ready", e));
         LOGGER.debugCr(reconciliation, "Pod {} is now ready", podName);
     }
+
+    // REFACTORED: Now delegates to KRaftQuorumReconciler
+    /**
+     * Updates the controller quorum membership after a controller restart with a new directory ID.
+     * When a disk is replaced, the controller appears in both voters (old directory ID) and
+     * observers (new directory ID). This method removes the old voter and adds the new one.
+     *
+     * @param nodeRef The controller node that was just restarted
+     * @throws InterruptedException If the thread was interrupted
+     * @throws ForceableProblem If there was an error updating the quorum membership
+     */
+    private void updateControllerQuorumMembership(NodeRef nodeRef)
+            throws InterruptedException, ForceableProblem {
+
+        if (!nodeRef.controller()) {
+            // Only applies to controllers
+            return;
+        }
+
+        if (controllerAdminClient == null) {
+            // Not using KRaft or controller admin client not available
+            return;
+        }
+
+        LOGGER.infoCr(reconciliation, "Checking if controller quorum membership needs update for {}", nodeRef);
+
+        try {
+            // Delegate to KRaftQuorumReconciler for single controller reconciliation
+            KRaftQuorumReconciler quorumReconciler = new KRaftQuorumReconciler(
+                    reconciliation,
+                    adminClientProvider,
+                    kafkaAgentClientProvider,
+                    coTlsPemIdentity,
+                    podOperations
+            );
+
+            // Await on the Future to get blocking behavior
+            await(quorumReconciler.reconcileSingleController(nodeRef), 60_000,
+                    error -> new ForceableProblem("Failed to reconcile controller " + nodeRef.nodeId(), error)
+            );
+
+        } catch (ForceableProblem e) {
+            LOGGER.warnCr(reconciliation, "Failed to update controller quorum membership for {}", nodeRef, e);
+            throw e;
+        }
+    }
+
+    // OLD IMPLEMENTATION
+    /*
+    private void updateControllerQuorumMembership(NodeRef nodeRef)
+            throws InterruptedException, ForceableProblem {
+
+        if (!nodeRef.controller()) {
+            // Only applies to controllers
+            return;
+        }
+
+        if (controllerAdminClient == null) {
+            // Not using KRaft or controller admin client not available
+            return;
+        }
+
+        LOGGER.infoCr(reconciliation, "**** Checking if controller quorum membership needs update for {}", nodeRef);
+
+        try {
+            // 1. Get current quorum state
+            QuorumInfo quorumInfo = await(
+                VertxUtil.kafkaFutureToVertxFuture(reconciliation, vertx,
+                    controllerAdminClient.describeMetadataQuorum().quorumInfo()),
+                60_000,
+                error -> new ForceableProblem("Error describing metadata quorum", error)
+            );
+
+            // 2. Check if this controller appears in observers (with new directory ID)
+            QuorumInfo.ReplicaState observerState = quorumInfo.observers().stream()
+                .filter(state -> state.replicaId() == nodeRef.nodeId())
+                .findFirst()
+                .orElse(null);
+
+            // 3. Check if this controller also appears in voters (with old directory ID)
+            QuorumInfo.ReplicaState voterState = quorumInfo.voters().stream()
+                .filter(state -> state.replicaId() == nodeRef.nodeId())
+                .findFirst()
+                .orElse(null);
+
+            // 4. If controller is in BOTH observers and voters, directory ID has changed
+            if (observerState != null && voterState != null) {
+                Uuid oldDirectoryId = voterState.replicaDirectoryId();
+                Uuid newDirectoryId = observerState.replicaDirectoryId();
+
+                LOGGER.infoCr(reconciliation, "**** Controller {} detected with disk change. Old directory ID: {}, New directory ID: {}",
+                    nodeRef.nodeId(), oldDirectoryId, newDirectoryId);
+
+                // 5. Remove voter with old directory ID first
+                LOGGER.infoCr(reconciliation, "**** Removing controller {} from voters with old directory ID {}",
+                    nodeRef.nodeId(), oldDirectoryId);
+                await(
+                    VertxUtil.kafkaFutureToVertxFuture(reconciliation, vertx,
+                        controllerAdminClient.removeRaftVoter(nodeRef.nodeId(), oldDirectoryId).all()),
+                    60_000,
+                    error -> new ForceableProblem("Error removing voter with old directory ID", error)
+                );
+
+                LOGGER.infoCr(reconciliation, "**** Successfully removed controller {} from voters with old directory ID", nodeRef.nodeId());
+
+                // 6. Add voter with new directory ID
+                LOGGER.infoCr(reconciliation, "**** Adding controller {} to voters with new directory ID {}",
+                    nodeRef.nodeId(), newDirectoryId);
+
+                // Construct the controller endpoint
+                String host = DnsNameGenerator.podDnsNameWithoutClusterDomain(
+                    namespace,
+                    KafkaResources.brokersServiceName(cluster),
+                    nodeRef.podName());
+                RaftVoterEndpoint endpoint = new RaftVoterEndpoint("CONTROLPLANE-9090", host, 9090);
+
+                await(
+                    VertxUtil.kafkaFutureToVertxFuture(reconciliation, vertx,
+                        controllerAdminClient.addRaftVoter(nodeRef.nodeId(), newDirectoryId, Set.of(endpoint)).all()),
+                    60_000,
+                    error -> new ForceableProblem("Error adding voter with new directory ID", error)
+                );
+
+                LOGGER.infoCr(reconciliation, "**** Successfully added controller {} to voters with new directory ID. Quorum membership updated.", nodeRef.nodeId());
+
+            } else if (observerState != null) {
+                LOGGER.infoCr(reconciliation, "**** Controller {} is in observers but not in voters (new controller scale-up case)", nodeRef.nodeId());
+                // This would be a scale-up scenario - handled elsewhere
+            } else if (voterState != null) {
+                LOGGER.infoCr(reconciliation, "**** Controller {} is in voters only (normal case, no directory ID change)", nodeRef.nodeId());
+                // Normal case - controller is only in voters with correct directory ID
+            } else {
+                LOGGER.warnCr(reconciliation, "Controller {} not found in either voters or observers", nodeRef.nodeId());
+            }
+
+        } catch (ForceableProblem e) {
+            LOGGER.warnCr(reconciliation, "Failed to update controller quorum membership for {}", nodeRef, e);
+            throw e;
+        }
+    }
+    */
 
     /**
      * Block waiting for up to the given timeout for the given Future to complete, returning its result.
