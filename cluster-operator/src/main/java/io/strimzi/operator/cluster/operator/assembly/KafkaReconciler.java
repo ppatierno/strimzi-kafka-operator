@@ -45,7 +45,9 @@ import io.strimzi.operator.cluster.model.NodeRef;
 import io.strimzi.operator.cluster.model.PodSetUtils;
 import io.strimzi.operator.cluster.model.RestartReason;
 import io.strimzi.operator.cluster.model.RestartReasons;
+//import io.strimzi.operator.cluster.model.VolumeUtils;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
+import io.strimzi.operator.cluster.operator.resource.KafkaAgentClient;
 import io.strimzi.operator.cluster.operator.resource.KafkaAgentClientProvider;
 import io.strimzi.operator.cluster.operator.resource.KafkaRoller;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
@@ -84,6 +86,7 @@ import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.QuorumInfo;
 import org.apache.kafka.common.KafkaException;
 
 import java.time.Clock;
@@ -164,6 +167,8 @@ public class KafkaReconciler {
     private final List<String> secretsToDelete = new ArrayList<>();
     /* test */ TlsPemIdentity coTlsPemIdentity;
     /* test */ KafkaListenersReconciler.ReconciliationResult listenerReconciliationResults; // Result of the listener reconciliation with the listener details
+    /* test */ Map<String, String> controllerDirectoryIds; // Controller directory IDs from quorum reconciliation
+    private final Map<String, String> statusControllerDirectoryIds; // Controller directory IDs from Kafka CR status at reconciliation start
 
     private final KafkaAutoRebalanceStatus kafkaAutoRebalanceStatus;
 
@@ -210,6 +215,9 @@ public class KafkaReconciler {
         this.imagePullSecrets = config.getImagePullSecrets();
         this.isPodDisruptionBudgetGeneration = config.isPodDisruptionBudgetGeneration();
         this.kafkaAutoRebalanceStatus = kafkaCr.getStatus() != null ? kafkaCr.getStatus().getAutoRebalance() : null;
+        this.statusControllerDirectoryIds = kafkaCr.getStatus() != null && kafkaCr.getStatus().getControllerDirectoryIds() != null
+                ? kafkaCr.getStatus().getControllerDirectoryIds()
+                : new HashMap<>();
 
         this.strimziPodSetOperator = supplier.strimziPodSetOperator;
         this.secretOperator = supplier.secretOperations;
@@ -256,6 +264,15 @@ public class KafkaReconciler {
                 .compose(i -> initClusterRoleBinding())
                 .compose(i -> kafkaRole())
                 .compose(i -> kafkaRoleBinding())
+                // by fixing https://issues.apache.org/jira/browse/KAFKA-19850, controllers unregistration can be done here
+                // before shutting down controllers even with autojoin enabled (they won't re-autojoin again)
+                //.compose(i -> controllerUnregistration())
+                // Complete any pending controller registrations from previous reconciliation before rolling
+                // This handles cases where a controller was removed from voters (old directory ID) but
+                // failed to be added back as voter (new directory ID) due to observer not being ready yet
+                //.compose(i -> controllerRegistration())
+                // Skip nodes that are becoming controllers (they need rolling first)
+                .compose(i -> reconcileKRaftQuorum(true))
                 .compose(i -> scaleDown())
                 .compose(i -> updateNodePoolStatuses(kafkaStatus))
                 .compose(i -> listeners())
@@ -271,6 +288,12 @@ public class KafkaReconciler {
                 .compose(i -> clusterId(kafkaStatus))
                 .compose(i -> defaultKafkaQuotas())
                 .compose(i -> nodeUnregistration())
+                // By using the auto join feature within Apache Kafka 4.2.0, controllers registration is not needed anymore
+                //.compose(i -> controllerRegistration())
+                // See above why controllers unregistration can be done before shut down controllers and not after (here)
+                //.compose(i -> controllerUnregistration())
+                // After rolling, all controllers are ready, don't skip any
+                .compose(i -> reconcileKRaftQuorum(false))
                 .compose(i -> metadataVersion(kafkaStatus))
                 .compose(i -> deletePersistentClaims())
                 .compose(i -> sharedKafkaConfigurationCleanup())
@@ -1062,6 +1085,453 @@ public class KafkaReconciler {
         return unregistrationPromise.future();
     }
 
+    protected Future<Void> controllerUnregistration() {
+        /*
+        Set<NodeRef> scaledDownControllerNodes = new HashSet<>();
+        scaledDownControllerNodes.addAll(kafka.removedControllers());
+        scaledDownControllerNodes.addAll(kafka.usedToBeControllerNodes());
+        LOGGER.infoCr(reconciliation, "**** ScaledDown controllers = {}", scaledDownControllerNodes);
+        if (!scaledDownControllerNodes.isEmpty()) {
+            return KafkaNodeUnregistration.unregisterControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledDownControllerNodes);
+        } else {
+            return Future.succeededFuture();
+        }
+        */
+
+        /*
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<Integer> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).map(NodeRef::nodeId).collect(Collectors.toSet());
+        Promise<Void> unregistrationPromise = Promise.promise();
+
+        KafkaNodeUnregistration.listQuorumVoters(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
+                .onSuccess(voters -> {
+
+                    // Identify controllers that need to be unregistered (scale down: in voters but not in desiredControllers)
+                    Set<Integer> controllersToUnregister = voters.stream()
+                            .filter(id -> !desiredControllers.contains(id))
+                            .collect(Collectors.toSet());
+
+                    if (!controllersToUnregister.isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "**** Controllers to unregister: {}", controllersToUnregister);
+
+                        KafkaNodeUnregistration.unregisterControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllersToUnregister)
+                                        .onComplete(res -> {
+                                            if (res.succeeded()) {
+                                                LOGGER.infoCr(reconciliation, "Kafka KRaft controllers {} were successfully unregistered from the Kafka cluster", controllersToUnregister);
+                                                unregistrationPromise.complete();
+                                            } else {
+                                                // unregistration failed, we will retry on next reconciliation
+                                                LOGGER.warnCr(reconciliation, "Failed to unregister KRaft controllers {} from the Kafka cluster", controllersToUnregister);
+                                                unregistrationPromise.fail(res.cause());
+                                            }
+
+                                            // We complete the promise with success even if the unregistration failed as we do not want to
+                                            // fail the reconciliation.
+                                            //unregistrationPromise.complete();
+                                        });
+
+                        // TODO: to be removed, this should not be here
+                        //unregistrationPromise.complete();
+                    } else {
+                        unregistrationPromise.complete();
+                    }
+                })
+                .onFailure(throwable -> {
+                    // listing KRaft quorum voters failed, we will retry on next reconciliation
+                    LOGGER.warnCr(reconciliation, "Failed to list KRaft quorum voters from the Kafka cluster", throwable);
+                    unregistrationPromise.complete();
+                });
+
+        return unregistrationPromise.future();
+        */
+        return Future.succeededFuture();
+    }
+
+    // TODO: to be removed if using Apache Kafka 4.2.0 where the controller quorum auto join feature is used
+    protected Future<Void> controllerRegistration() {
+        /*
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+
+        // gather all the added brokers across the entire cluster accounting all node pools
+        Set<NodeRef> addedControllers = kafka.addedNodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+
+        // if added controllers list contains all desired, it's a newly created cluster so there are no actual scaled up brokers.
+        // when added controllers list has fewer nodes than desired, it actually contains the new ones for scaling up
+        Set<NodeRef> scaledUpNewControllerNodes = addedControllers.containsAll(desiredControllers) ? Set.of() : addedControllers;
+
+        Set<NodeRef> scaledUpControllerNodes = new HashSet<>();
+        scaledUpControllerNodes.addAll(scaledUpNewControllerNodes);
+        scaledUpControllerNodes.addAll(kafka.becomingControllerNodes());
+
+        LOGGER.infoCr(reconciliation, "**** ScaledUp controllers = {}", scaledUpControllerNodes);
+        if (!scaledUpControllerNodes.isEmpty()) {
+            return KafkaNodeUnregistration.registerControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledUpControllerNodes);
+        } else {
+            return Future.succeededFuture();
+        }
+        */
+
+        /*
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+        Promise<Void> registrationPromise = Promise.promise();
+
+        KafkaNodeUnregistration.listQuorumVoters(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
+                .onSuccess(voters -> {
+
+                    // Identify controllers that need to be registered (scale up: in controllersToReconcile but not in voters)
+                    Set<NodeRef> controllersToRegister = desiredControllers.stream()
+                            .filter(controller -> !voters.contains(controller.nodeId()))
+                            .collect(Collectors.toSet());
+
+                    if (!controllersToRegister.isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "**** Controllers to register: {}", controllersToRegister);
+
+                        KafkaNodeUnregistration.registerControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllersToRegister)
+                                .onComplete(res -> {
+                                    if (res.succeeded()) {
+                                        LOGGER.infoCr(reconciliation, "Kafka KRaft controllers {} were successfully registered from the Kafka cluster", controllersToRegister);
+                                        registrationPromise.complete();
+                                    } else {
+                                        // registration failed, we will retry on next reconciliation
+                                        LOGGER.warnCr(reconciliation, "Failed to unregister KRaft controllers {} from the Kafka cluster", controllersToRegister);
+                                        registrationPromise.fail(res.cause());
+                                    }
+
+                                    // We complete the promise with success even if the registration failed as we do not want to
+                                    // fail the reconciliation.
+                                    registrationPromise.complete();
+                                });
+
+                    } else {
+                        registrationPromise.complete();
+                    }
+                })
+                .onFailure(throwable -> {
+                    // listing KRaft quorum voters failed, we will retry on next reconciliation
+                    LOGGER.warnCr(reconciliation, "Failed to list KRaft quorum voters from the Kafka cluster", throwable);
+                    registrationPromise.complete();
+                });
+
+        return registrationPromise.future();
+        */
+        return Future.succeededFuture();
+    }
+
+    /*
+     * OLD CODE - Using deterministic directory IDs for disk change detection
+     *
+    protected Future<Void> reconcileKRaftQuorum(boolean skipRoleChanging) {
+        if (kafka.currentControllers().isEmpty()) {
+            return Future.succeededFuture();
+        }
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+
+        // If skipRoleChanging is true, exclude nodes that need rolling to become controllers
+        if (skipRoleChanging) {
+            Set<NodeRef> becomingControllers = kafka.becomingControllerNodes();
+            desiredControllers.removeAll(becomingControllers);
+        }
+
+        Promise<Void> reconcileKRaftQuorumPromise = Promise.promise();
+        LOGGER.infoCr(reconciliation, "**** controllersToReconcile: {}", desiredControllers);
+
+        KafkaNodeUnregistration.describeMetadataQuorum(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
+                .onSuccess(quorumInfo -> {
+
+                    Set<Integer> desiredVoters = desiredControllers.stream()
+                            .map(NodeRef::nodeId)
+                            .collect(Collectors.toSet());
+
+                    // COLLECTING unregistrations
+
+                    // Identify controllers that need to be unregistered because of scale down operation (in voters but not in desiredVoters)
+                    Set<QuorumInfo.ReplicaState> scaledDownControllersToUnregister = quorumInfo.voters().stream()
+                            .filter(rs -> !desiredVoters.contains(rs.replicaId()))
+                            .collect(Collectors.toSet());
+
+                    // Identify controllers for which we need to unregister their old "incarnation", with a different directory id (i.e. disk change)
+                    // They are desiredVoters, and also they are both in voters and observers, and the voter's directory ID doesn't match the expected one
+                    Set<QuorumInfo.ReplicaState> diskChangeControllersToUnregister = quorumInfo.voters().stream()
+                            .filter(rs -> desiredVoters.contains(rs.replicaId()))
+                            .filter(rs -> quorumInfo.observers().stream()
+                                    .anyMatch(obs -> obs.replicaId() == rs.replicaId()))
+                            .filter(rs -> {
+                                // Calculate expected directory ID - if voter's directory ID doesn't match, it's the old one
+                                KafkaPool pool = kafka.nodePoolForNodeId(rs.replicaId());
+                                String expectedDirectoryId = VolumeUtils.makeDirectoryId(
+                                        reconciliation.namespace(),
+                                        reconciliation.name(),
+                                        rs.replicaId(),
+                                        pool);
+                                // Only unregister if the voter's directory ID doesn't match the expected one
+                                return !rs.replicaDirectoryId().toString().equals(expectedDirectoryId);
+                            })
+                            .collect(Collectors.toSet());
+
+                    // Combine both sets of controllers to unregister
+                    Set<QuorumInfo.ReplicaState> controllersToUnregister = new HashSet<>(scaledDownControllersToUnregister);
+                    controllersToUnregister.addAll(diskChangeControllersToUnregister);
+
+                    // COLLECTING registrations
+
+                    // Identify controllers that need to be registered because of scale up operation (in desiredVoters and still observers but not in actual voters)
+                    // and also the ones who were already controllers but now have a new directory ID (i.e. disk failure/replacement)
+                    // Filter by expected directory ID to avoid registering stale observers with old directory IDs
+                    Set<QuorumInfo.ReplicaState> controllersToRegister = quorumInfo.observers().stream()
+                            .filter(obs -> desiredVoters.contains(obs.replicaId()))
+                            .filter(obs -> quorumInfo.voters().stream().noneMatch(voter -> voter.replicaId() == obs.replicaId()))
+                            .filter(obs -> {
+                                // Calculate expected directory ID for this observer's node
+                                KafkaPool pool = kafka.nodePoolForNodeId(obs.replicaId());
+                                String expectedDirectoryId = VolumeUtils.makeDirectoryId(
+                                        reconciliation.namespace(),
+                                        reconciliation.name(),
+                                        obs.replicaId(),
+                                        pool);
+                                // Only include observers with the expected directory ID
+                                return obs.replicaDirectoryId().toString().equals(expectedDirectoryId);
+                            })
+                            .collect(Collectors.toSet());
+
+                    // PERFORM registrations and unregistrations
+
+                    Future<Void> registerFuture = !controllersToRegister.isEmpty()
+                            ? KafkaNodeUnregistration.registerControllerReplicas(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllersToRegister, desiredControllers)
+                            : Future.succeededFuture();
+
+                    Future<Void> unregisterFuture = !controllersToUnregister.isEmpty()
+                            ? KafkaNodeUnregistration.unregisterControllerReplicas(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllersToUnregister)
+                            : Future.succeededFuture();
+
+                    registerFuture
+                            .compose(v -> unregisterFuture)
+                            .onComplete(res -> {
+                                if (res.succeeded()) {
+                                    LOGGER.infoCr(reconciliation, "Successfully reconciled KRaft quorum");
+                                    reconcileKRaftQuorumPromise.complete();
+                                } else {
+                                    LOGGER.warnCr(reconciliation, "Failed to reconcile KRaft quorum", res.cause());
+                                    reconcileKRaftQuorumPromise.fail(res.cause());
+                                }
+                            });
+                })
+                .onFailure(throwable -> {
+                    // describe KRaft quorum failed
+                    LOGGER.warnCr(reconciliation, "Failed decribe KRaft quorum within Kafka cluster", throwable);
+                    reconcileKRaftQuorumPromise.fail(throwable);
+                });
+
+        return reconcileKRaftQuorumPromise.future();
+    }
+    */
+
+    /**
+     * Reconciles the KRaft quorum by registering and unregistering controllers
+     */
+    protected Future<Void> reconcileKRaftQuorum(boolean skipRoleChanging) {
+        if (kafka.currentControllers().isEmpty()) {
+            return Future.succeededFuture();
+        }
+
+        // Gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+
+        // If skipRoleChanging is true, exclude nodes that need rolling to become controllers
+        if (skipRoleChanging) {
+            Set<NodeRef> becomingControllers = kafka.becomingControllerNodes();
+            desiredControllers.removeAll(becomingControllers);
+        }
+
+        LOGGER.infoCr(reconciliation, "Reconciling KRaft quorum with controllers: {}", desiredControllers);
+
+        return KafkaNodeUnregistration.describeMetadataQuorum(reconciliation, vertx,
+                        adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
+                .compose(quorumInfo -> analyzeQuorumChanges(quorumInfo, desiredControllers))
+                .compose(changes -> {
+                    // Phase 2: Register first (quorum grows - safer)
+                    if (changes.toRegister.isEmpty()) {
+                        return Future.succeededFuture();
+                    }
+                    LOGGER.infoCr(reconciliation, "Registering {} controllers to quorum", changes.toRegister.size());
+                    return KafkaNodeUnregistration.registerControllerReplicas(
+                            reconciliation, vertx, adminClientProvider,
+                            coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(),
+                            new HashSet<>(changes.toRegister), desiredControllers);
+                })
+                .compose(v -> {
+                    // Phase 3: Re-read quorum after registration
+                    return KafkaNodeUnregistration.describeMetadataQuorum(reconciliation, vertx,
+                        adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity());
+                })
+                .compose(quorumInfo -> analyzeQuorumChanges(quorumInfo, desiredControllers))
+                .compose(changes -> {
+                    // Phase 4: Unregister after (quorum shrinks only after new voters are in)
+                    if (changes.toUnregister.isEmpty()) {
+                        return Future.succeededFuture();
+                    }
+                    LOGGER.infoCr(reconciliation, "Unregistering {} controllers from quorum", changes.toUnregister.size());
+                    return KafkaNodeUnregistration.unregisterControllerReplicas(
+                            reconciliation, vertx, adminClientProvider,
+                            coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(),
+                            new HashSet<>(changes.toUnregister));
+                })
+                .compose(v -> {
+                    // Phase 5: Read final quorum state to get directory IDs for status
+                    return KafkaNodeUnregistration.describeMetadataQuorum(reconciliation, vertx,
+                        adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity());
+                })
+                .compose(finalQuorumInfo -> {
+                    // Store controller directory IDs from the final quorum state
+                    Map<String, String> dirIds = new HashMap<>();
+                    for (QuorumInfo.ReplicaState voter : finalQuorumInfo.voters()) {
+                        dirIds.put(String.valueOf(voter.replicaId()),
+                                voter.replicaDirectoryId().toString());
+                    }
+                    controllerDirectoryIds = dirIds;
+                    LOGGER.infoCr(reconciliation, "Successfully reconciled KRaft quorum, directory IDs: {}", dirIds);
+                    return Future.succeededFuture();
+                });
+    }
+
+    /**
+     * Represents changes needed to the KRaft quorum
+     */
+    private record QuorumChanges(List<QuorumInfo.ReplicaState> toRegister, List<QuorumInfo.ReplicaState> toUnregister) { }
+
+    /**
+     * Analyzes the current quorum state and determines what changes are needed
+     */
+    private Future<QuorumChanges> analyzeQuorumChanges(QuorumInfo quorumInfo, Set<NodeRef> desiredControllers) {
+        Set<Integer> desiredVoters = desiredControllers.stream()
+                .map(NodeRef::nodeId)
+                .collect(Collectors.toSet());
+
+        List<QuorumInfo.ReplicaState> toRegister = new ArrayList<>();
+        List<QuorumInfo.ReplicaState> toUnregister = new ArrayList<>();
+
+        // PHASE 1: Analyze desired controllers
+        List<Future<Void>> analysisFutures = new ArrayList<>();
+
+        for (NodeRef controller : desiredControllers) {
+            Future<Void> analysisFuture = analyzeControllerNode(controller, quorumInfo, statusControllerDirectoryIds, toRegister, toUnregister);
+            analysisFutures.add(analysisFuture);
+        }
+
+        // PHASE 2: Handle scale-down (voters not in desired)
+        for (QuorumInfo.ReplicaState voter : quorumInfo.voters()) {
+            if (!desiredVoters.contains(voter.replicaId())) {
+                LOGGER.infoCr(reconciliation, "Controller {} is in voters but not in desired controllers - will unregister", voter.replicaId());
+                toUnregister.add(voter);
+            }
+        }
+
+        return Future.join(analysisFutures)
+                .map(v -> new QuorumChanges(toRegister, toUnregister));
+    }
+
+    /**
+     * Analyzes a single controller node to determine if registration/unregistration is needed
+     */
+    private Future<Void> analyzeControllerNode(NodeRef controller, QuorumInfo quorumInfo,
+                                               Map<String, String> statusDirIds,
+                                               List<QuorumInfo.ReplicaState> toRegister,
+                                               List<QuorumInfo.ReplicaState> toUnregister) {
+        int nodeId = controller.nodeId();
+        String expectedDirId = statusDirIds.get(String.valueOf(nodeId));
+
+        // Find all voters and observers for this node ID
+        List<QuorumInfo.ReplicaState> voters = quorumInfo.voters().stream()
+                .filter(rs -> rs.replicaId() == nodeId)
+                .collect(Collectors.toList());
+        List<QuorumInfo.ReplicaState> observers = quorumInfo.observers().stream()
+                .filter(rs -> rs.replicaId() == nodeId)
+                .collect(Collectors.toList());
+
+        // Disk change recovery scenario: multiple observers or voter+observer
+        if (observers.size() > 1 || (!voters.isEmpty() && !observers.isEmpty())) {
+            LOGGER.infoCr(reconciliation,
+                    "Controller {} has multiple incarnations (voters: {}, observers: {}) - reading meta.properties",
+                    nodeId, voters.size(), observers.size());
+
+            // Read actual directory ID from pod to determine which is current
+            return readDirectoryIdFromPod(controller)
+                    .compose(actualDirId -> {
+                        if (actualDirId == null) {
+                            LOGGER.warnCr(reconciliation, "Could not read directory ID from pod {} - failing reconciliation to retry later", controller.podName());
+                            return Future.failedFuture(new RuntimeException("Could not read directory ID from pod " + controller.podName()));
+                        }
+
+                        // Unregister any voters with wrong directory ID
+                        for (QuorumInfo.ReplicaState voter : voters) {
+                            if (!voter.replicaDirectoryId().toString().equals(actualDirId)) {
+                                LOGGER.infoCr(reconciliation, "Controller {} voter has stale directory ID {} (actual: {}) - will unregister", nodeId, voter.replicaDirectoryId(), actualDirId);
+                                toUnregister.add(voter);
+                            }
+                        }
+
+                        // Register observer with correct directory ID if not already a voter
+                        boolean hasCorrectVoter = voters.stream()
+                                .anyMatch(v -> v.replicaDirectoryId().toString().equals(actualDirId));
+
+                        if (!hasCorrectVoter) {
+                            QuorumInfo.ReplicaState correctObserver = observers.stream()
+                                    .filter(obs -> obs.replicaDirectoryId().toString().equals(actualDirId))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (correctObserver != null) {
+                                LOGGER.infoCr(reconciliation, "Controller {} observer has correct directory ID {} - will register", nodeId, actualDirId);
+                                toRegister.add(correctObserver);
+                            }
+                        }
+
+                        return Future.succeededFuture();
+                    });
+        } else if (expectedDirId == null) {
+            // New node - not in status yet
+            if (!observers.isEmpty()) {
+                LOGGER.infoCr(reconciliation, "Controller {} is new (not in status), observer present - will register", nodeId);
+                toRegister.add(observers.get(0));
+            } else if (!voters.isEmpty()) {
+                // Already a voter, nothing to do
+                LOGGER.debugCr(reconciliation, "Controller {} is new but already in voters", nodeId);
+            }
+            return Future.succeededFuture();
+        } else if (!voters.isEmpty() && observers.isEmpty()) {
+            // Controller is only in voters (no observer) - it's already correct, leave it alone
+            // Status might be stale (not synced yet after KafkaRoller changes)
+            LOGGER.debugCr(reconciliation, "Controller {} is only in voters - already correct", nodeId);
+            return Future.succeededFuture();
+        } else {
+            // Only in observers - since multiple observers already handled above, this is a single observer
+            // Register it without comparing to expectedDirId (which could be stale)
+            if (!observers.isEmpty()) {
+                LOGGER.infoCr(reconciliation, "Controller {} is only in observers - will register", nodeId);
+                toRegister.add(observers.get(0));
+            }
+
+            return Future.succeededFuture();
+        }
+    }
+
+    /**
+     * Reads the directory ID from a controller pod's meta.properties file
+     */
+    private Future<String> readDirectoryIdFromPod(NodeRef controller) {
+        return vertx.executeBlocking(() -> {
+            try {
+                KafkaAgentClient agentClient = kafkaAgentClientProvider.createKafkaAgentClient(reconciliation, coTlsPemIdentity);
+                return agentClient.getDirectoryId(controller.podName());
+            } catch (Exception e) {
+                LOGGER.warnCr(reconciliation, "Failed to read directory ID from pod {}", controller.podName(), e);
+                return null;
+            }
+        });
+    }
+
     /**
      * Manages the KRaft metadata version
      *
@@ -1214,6 +1684,8 @@ public class KafkaReconciler {
     /* test */ Future<Void> updateKafkaStatus(KafkaStatus kafkaStatus) {
         kafkaStatus.setListeners(listenerReconciliationResults.listenerStatuses);
         kafkaStatus.setKafkaVersion(kafka.getKafkaVersion().version());
+        kafkaStatus.setInitialControllers(kafka.getInitialControllers());
+        kafkaStatus.setControllerDirectoryIds(controllerDirectoryIds);
 
         return Future.succeededFuture();
     }

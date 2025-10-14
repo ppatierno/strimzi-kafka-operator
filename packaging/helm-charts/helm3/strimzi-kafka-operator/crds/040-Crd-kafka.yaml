@@ -4965,6 +4965,12 @@ spec:
                             type: array
                             items:
                               type: integer
+                initialControllers:
+                  type: string
+                controllerDirectoryIds:
+                  additionalProperties:
+                    type: string
+                  type: object
           required:
             - spec
     - name: v1beta2
@@ -12706,3 +12712,9 @@ spec:
                             type: array
                             items:
                               type: integer
+                initialControllers:
+                  type: string
+                controllerDirectoryIds:
+                  additionalProperties:
+                    type: string
+                  type: object

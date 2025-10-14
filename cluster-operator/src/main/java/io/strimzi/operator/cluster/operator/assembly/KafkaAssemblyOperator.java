@@ -199,6 +199,20 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     // the auto-rebalance is enabled otherwise I could reset it to null if needed
                     status.setAutoRebalance(kafkaAssembly.getStatus().getAutoRebalance());
                 }
+
+                if (status.getInitialControllers() == null
+                        && kafkaAssembly.getStatus().getInitialControllers() != null)  {
+                    // Copy the initial controllers if needed
+                    // Even if reconciliation fails we need to set it because it's the differentiator between
+                    // static and dynamic quorum based cluster (for the next reconciliation)
+                    status.setInitialControllers(kafkaAssembly.getStatus().getInitialControllers());
+                }
+
+                if (status.getControllerDirectoryIds() == null
+                        && kafkaAssembly.getStatus().getControllerDirectoryIds() != null)  {
+                    // Copy the controller directory IDs if needed for disaster recovery
+                    status.setControllerDirectoryIds(kafkaAssembly.getStatus().getControllerDirectoryIds());
+                }
             }
 
             if (reconcileResult.succeeded())    {

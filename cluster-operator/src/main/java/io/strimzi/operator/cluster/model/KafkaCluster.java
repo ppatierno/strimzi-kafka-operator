@@ -94,11 +94,13 @@ import io.strimzi.operator.common.model.StatusUtils;
 import io.strimzi.plugin.security.profiles.PodSecurityProviderContext;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.server.common.MetadataVersion;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -210,6 +212,11 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     public static final String BROKER_METADATA_VERSION_FILENAME = "metadata.version";
 
     /**
+     * Key under which the initial controllers for KRaft dynamic quorum is stored in Config Map
+     */
+    public static final String INITIAL_CONTROLLERS_FILENAME = "initial.controllers";
+
+    /**
      * Key under which the class of the quota plugin can be configured
      */
     private static final String CLIENT_CALLBACK_CLASS_OPTION = "client.quota.callback.class";
@@ -222,6 +229,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     private KafkaVersion kafkaVersion;
     private String metadataVersion;
     private String clusterId;
+    private String initialControllers;
     private JmxModel jmx;
     private CruiseControlMetricsReporter ccMetricsReporter;
     private MetricsModel metrics;
@@ -285,7 +293,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      *
      * @return Kafka cluster instance
      */
-    @SuppressWarnings({"NPathComplexity", "deprecation"}) // Keycloak Authorization is deprecated; resource configuration in Kafka CR (.spec.kafka.resources) is deprecated
+    @SuppressWarnings({"NPathComplexity", "deprecation", "MethodLength"}) // Keycloak Authorization is deprecated; resource configuration in Kafka CR (.spec.kafka.resources) is deprecated
     public static KafkaCluster fromCrd(Reconciliation reconciliation,
                                        Kafka kafka,
                                        List<KafkaPool> pools,
@@ -300,6 +308,56 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
 
         result.clusterId = clusterId;
         result.nodePools = pools;
+
+        /*
+         * OLD CODE - Using deterministic directory IDs
+         *
+        // Load initial controllers IDs from the status if present, otherwise generate for new clusters
+        //if (kafka.getStatus() != null && kafka.getStatus().getInitialControllers() != null) {
+            //result.initialControllers = kafka.getStatus().getInitialControllers();
+        //} else if (result.isNewCluster()) {
+            // This is a new cluster, and it will use dynamic quorum so let's gather the initial controllers IDs
+        result.initialControllers =
+                result.controllerNodes().stream()
+                        .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                        //.map(node -> String.format("%s@%s:9090:%s", node.nodeId(), DnsNameGenerator.podDnsName(result.namespace, KafkaResources.brokersServiceName(result.cluster), node.podName()), Uuid.randomUuid().toString()))
+                        .map(node -> {
+                            KafkaPool pool = result.nodePoolForNodeId(node.nodeId());
+                            String directoryId = VolumeUtils.makeDirectoryId(result.namespace, result.cluster, node.nodeId(), pool);
+                            return String.format("%s@%s:9090:%s", node.nodeId(), DnsNameGenerator.podDnsName(result.namespace, KafkaResources.brokersServiceName(result.cluster), node.podName()), directoryId);
+                        })
+                        .collect(Collectors.joining(","));
+        //}
+        */
+
+        // NEW CODE - Generate initial controllers configuration for KRaft mode
+        // For each controller node:
+        // - If directory ID is in status, use it (existing controller or disaster recovery)
+        // - If NOT in status, generate a new random UUID (new controller being added)
+        Map<String, String> statusDirIds = kafka.getStatus() != null && kafka.getStatus().getControllerDirectoryIds() != null
+                ? kafka.getStatus().getControllerDirectoryIds()
+                : new HashMap<>();
+
+        result.initialControllers =
+                result.controllerNodes().stream()
+                        .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                        .map(node -> {
+                            // Check if this controller's directory ID is in the status
+                            String directoryId = statusDirIds.get(String.valueOf(node.nodeId()));
+                            if (directoryId == null) {
+                                // New controller - generate random UUID
+                                directoryId = Uuid.randomUuid().toString();
+                            }
+                            // If directoryId is in status, use it (existing controller or disaster recovery)
+                            return String.format("%s@%s:9090:%s",
+                                    node.nodeId(),
+                                    DnsNameGenerator.podDnsName(result.namespace,
+                                            KafkaResources.brokersServiceName(result.cluster),
+                                            node.podName()),
+                                    directoryId);
+                        })
+                        .collect(Collectors.joining(","));
+        LOGGER.infoCr(reconciliation, "**** initialControllers = {}", result.initialControllers);
 
         // This also validates that the Kafka version is supported
         result.kafkaVersion = versions.supportedVersion(kafkaClusterSpec.getVersion());
@@ -455,6 +513,38 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     }
 
     /**
+     * Generates list of Kafka controller nodes that are going to be removed from the Kafka cluster.
+     *
+     * @return  Set of Kafka controller nodes which are going to be removed
+     */
+    public Set<NodeRef> removedControllers() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            if (pool.isController()) {
+                nodes.addAll(pool.scaledDownNodes());
+            }
+        }
+
+        return nodes;
+    }
+
+    /**
+     * Generates list of controller nodes currently running in the Kafka cluster.
+     *
+     * @return  Set of current controller nodes
+     */
+    public Set<NodeRef> currentControllers() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            nodes.addAll(pool.currentControllers());
+        }
+
+        return nodes;
+    }
+
+    /**
      * Generates list of Kafka node IDs that used to have the broker role but do not have it anymore.
      *
      * @return  Set of Kafka node IDs which are removing the broker role
@@ -464,6 +554,37 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
 
         for (KafkaPool pool : nodePools)    {
             nodes.addAll(pool.usedToBeBrokerNodes());
+        }
+
+        return nodes;
+    }
+
+    /**
+     * Generates list of references to Kafka nodes that used to have the controller role but do not have it anymore.
+     *
+     * @return  Set of Kafka node references which are removing the controller role
+     */
+    public Set<NodeRef> usedToBeControllerNodes() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            nodes.addAll(pool.usedToBeControllerNodes());
+        }
+
+        return nodes;
+    }
+
+    // TODO: to be removed if using Apache Kafka 4.2.0 where the controller quorum auto join feature is used
+    /**
+     * Generates list of references to Kafka nodes that are gaining the controller role.
+     *
+     * @return  Set of Kafka node references which are gaining the controller role
+     */
+    public Set<NodeRef> becomingControllerNodes() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            nodes.addAll(pool.becomingControllerNodes());
         }
 
         return nodes;
@@ -1817,7 +1938,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      * @return  String with the Kafka broker configuration
      */
     private String generatePerBrokerConfiguration(NodeRef node, KafkaPool pool, Map<Integer, Map<String, String>> advertisedHostnames, Map<Integer, Map<String, String>> advertisedPorts)   {
-        return new KafkaBrokerConfigurationBuilder(reconciliation, node)
+        return new KafkaBrokerConfigurationBuilder(reconciliation, node, initialControllers)
                 .withRackId(rack)
                 .withKRaft(cluster, namespace, nodes())
                 .withKRaftMetadataLogDir(VolumeUtils.kraftMetadataPath(pool.storage))
@@ -1871,6 +1992,11 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                 data.put(BROKER_CONFIGURATION_FILENAME, generatePerBrokerConfiguration(node, pool, advertisedHostnames, advertisedPorts));
                 data.put(BROKER_CLUSTER_ID_FILENAME, clusterId);
                 data.put(BROKER_METADATA_VERSION_FILENAME, metadataVersion);
+                // initial controllers are set for both brokers and controllers when using dynamic quorum
+                // The bash script uses this to determine dynamic quorum usage and appropriate formatting options
+                if (initialControllers != null) {
+                    data.put(INITIAL_CONTROLLERS_FILENAME, initialControllers);
+                }
 
                 configMaps.add(ConfigMapUtils.createConfigMap(node.podName(), namespace, pool.labels.withStrimziPodName(node.podName()), pool.ownerReference, data));
 
@@ -1896,6 +2022,15 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      */
     public String getMetadataVersion() {
         return metadataVersion;
+    }
+
+    /**
+     * Gets the Initial controllers for dynamic quorum. Null if it's using static quorum.
+     *
+     * @return Initial controllers for dynamic quorum. Null if it's using static quorum.
+     */
+    public String getInitialControllers() {
+        return initialControllers;
     }
 
     /**
@@ -1990,6 +2125,18 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         }
 
         return consolidatedWarningConditions;
+    }
+
+    /**
+     * Checks if this is a new Kafka cluster (i.e. all controller pools have no current nodes)
+     *
+     * @return  True if this is a new cluster, false otherwise
+     */
+    private boolean isNewCluster() {
+        // A cluster is new if all controller pools have no current nodes
+        return nodePools.stream()
+                .filter(KafkaPool::isController)
+                .allMatch(pool -> pool.idAssignment.current().isEmpty());
     }
 
     /**

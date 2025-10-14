@@ -17,6 +17,7 @@ import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Represents a status of the Kafka resource
@@ -27,7 +28,7 @@ import java.util.List;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({ "conditions", "observedGeneration", "listeners", "kafkaNodePools", "registeredNodeIds", "clusterId",
-    "operatorLastSuccessfulVersion", "kafkaVersion", "kafkaMetadataVersion", "kafkaMetadataState", "autoRebalance" })
+    "operatorLastSuccessfulVersion", "kafkaVersion", "kafkaMetadataVersion", "kafkaMetadataState", "autoRebalance", "initialControllers", "controllerDirectoryIds" })
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 public class KafkaStatus extends Status {
@@ -41,6 +42,8 @@ public class KafkaStatus extends Status {
     private String kafkaMetadataVersion;
     private KafkaMetadataState kafkaMetadataState;
     private KafkaAutoRebalanceStatus autoRebalance;
+    private String initialControllers;
+    private Map<String, String> controllerDirectoryIds;
 
     @Description("Addresses of the internal and external listeners")
     public List<ListenerStatus> getListeners() {
@@ -129,5 +132,24 @@ public class KafkaStatus extends Status {
 
     public void setAutoRebalance(KafkaAutoRebalanceStatus autoRebalance) {
         this.autoRebalance = autoRebalance;
+    }
+
+    @Description("The initial controllers list when the dynamic quorum is used. " +
+            "It's empty when the static quorum is used.")
+    public String getInitialControllers() {
+        return initialControllers;
+    }
+
+    public void setInitialControllers(String initialControllers) {
+        this.initialControllers = initialControllers;
+    }
+
+    @Description("Map of controller node IDs to their directory IDs. Used for KRaft quorum management and disaster recovery.")
+    public Map<String, String> getControllerDirectoryIds() {
+        return controllerDirectoryIds;
+    }
+
+    public void setControllerDirectoryIds(Map<String, String> controllerDirectoryIds) {
+        this.controllerDirectoryIds = controllerDirectoryIds;
     }
 }
