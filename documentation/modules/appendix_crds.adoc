@@ -2366,6 +2366,9 @@ Used in: xref:type-Kafka-{context}[`Kafka`]
 |autoRebalance
 |xref:type-KafkaAutoRebalanceStatus-{context}[`KafkaAutoRebalanceStatus`]
 |The status of an auto-rebalancing triggered by a cluster scaling request.
+|initialControllers
+|string
+|The initial controllers list when the dynamic quorum is used. It's empty when the static quorum is used.
 |====
 
 [id='type-Condition-{context}']
