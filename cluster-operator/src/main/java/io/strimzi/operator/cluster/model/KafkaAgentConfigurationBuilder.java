@@ -92,6 +92,20 @@ public class KafkaAgentConfigurationBuilder {
     }
 
     /**
+     * Configures the KRaft metadata log directory
+     *
+     * @param kraftMetadataLogDir   Path to the KRaft metadata log directory
+     *
+     * @return Returns the builder instance
+     */
+    public KafkaAgentConfigurationBuilder withKraftMetadataLogDir(String kraftMetadataLogDir)   {
+        printSectionHeader("KRaft metadata log directory");
+        writer.println("kraftMetadataLogDir=" + kraftMetadataLogDir);
+
+        return this;
+    }
+
+    /**
      * Generates the configuration template as String
      *
      * @return String with the Kafka agent configuration template

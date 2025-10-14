@@ -70,6 +70,7 @@ public class KafkaAgent {
     private static final Logger LOGGER = LoggerFactory.getLogger(KafkaAgent.class);
     private static final String BROKER_STATE_PATH = "/v1/broker-state";
     private static final String READINESS_ENDPOINT_PATH = "/v1/ready";
+    private static final String DIRECTORY_ID_PATH = "/v1/directory-id";
     private static final int EXTERNAL_HTTP_PORT = 8443;
     private static final int INTERNAL_HTTP_PORT = 8080;
     private static final String EXTERNAL_CONNECTOR_NAME = "external";
@@ -190,7 +191,10 @@ public class KafkaAgent {
         ContextHandler readinessContext = new ContextHandler(READINESS_ENDPOINT_PATH);
         readinessContext.setHandler(getReadinessHandler());
 
-        Handler handler = new ContextHandlerCollection(brokerStateContext, readinessContext);
+        ContextHandler directoryIdContext = new ContextHandler(DIRECTORY_ID_PATH);
+        directoryIdContext.setHandler(getDirectoryIdHandler());
+
+        Handler handler = new ContextHandlerCollection(brokerStateContext, readinessContext, directoryIdContext);
 
         if (config.get("tokenIssuer") != null) {
             // Service Account authentication is used => the requests arriving through the external connector have to be
@@ -277,6 +281,61 @@ public class KafkaAgent {
 
     private Secret getKubernetesSecret(String namespace, String caCertSecretName) {
         return client.secrets().inNamespace(namespace).withName(caCertSecretName).get();
+    }
+
+    /**
+     * Creates a Handler instance to handle incoming HTTP requests for directory ID
+     *
+     * @return Handler
+     */
+    /* test */ Handler getDirectoryIdHandler() {
+        return new Handler.Abstract() {
+            @Override
+            public boolean handle(Request request, Response response, Callback callback) throws Exception {
+                try {
+                    String directoryId = readDirectoryIdFromMetaProperties();
+                    response.setStatus(HttpServletResponse.SC_OK);
+                    response.getHeaders().put(HttpHeader.CONTENT_TYPE, "application/json");
+                    String json = String.format("{\"directoryId\":\"%s\"}", directoryId);
+                    response.write(true, StandardCharsets.UTF_8.encode(json), callback);
+                } catch (Exception e) {
+                    LOGGER.error("Error reading directory ID", e);
+                    response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                    response.write(true, StandardCharsets.UTF_8.encode("Error reading directory ID: " + e.getMessage()), callback);
+                }
+                return true;
+            }
+        };
+    }
+
+    /**
+     * Reads the directory ID from meta.properties file
+     *
+     * @return Directory ID as string
+     * @throws IOException if the file cannot be read or directory.id is not found
+     */
+    private String readDirectoryIdFromMetaProperties() throws IOException {
+        // The kraftMetadataLogDir is passed from kafka_run.sh and points to the metadata log directory
+        // e.g., /var/lib/kafka/data-0/kafka-log1
+        // The meta.properties file is located directly in this directory
+        String kraftMetadataLogDir = config.get("kraftMetadataLogDir");
+        if (kraftMetadataLogDir == null || kraftMetadataLogDir.isEmpty()) {
+            throw new IOException("kraftMetadataLogDir not configured");
+        }
+
+        String metaPropertiesPath = kraftMetadataLogDir + "/meta.properties";
+        LOGGER.debug("Reading directory ID from {}", metaPropertiesPath);
+
+        try (FileInputStream fis = new FileInputStream(metaPropertiesPath)) {
+            Properties props = new Properties();
+            props.load(fis);
+            String dirId = props.getProperty("directory.id");
+            if (dirId == null) {
+                throw new IOException("directory.id not found in meta.properties at " + metaPropertiesPath);
+            }
+            LOGGER.debug("Found directory ID: {}", dirId);
+            return dirId;
+        }
     }
 
     /**
