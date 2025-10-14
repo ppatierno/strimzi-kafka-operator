@@ -1220,6 +1220,7 @@ public class KafkaReconciler {
     /* test */ Future<Void> updateKafkaStatus(KafkaStatus kafkaStatus) {
         kafkaStatus.setListeners(listenerReconciliationResults.listenerStatuses);
         kafkaStatus.setKafkaVersion(kafka.getKafkaVersion().version());
+        kafkaStatus.setInitialControllers(kafka.getInitialControllers());
 
         return Future.succeededFuture();
     }

@@ -4960,6 +4960,16 @@ spec:
                           type: array
                           items:
                             type: integer
+              initialControllers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    nodeId:
+                      type: integer
+                      minimum: 0
+                    directoryId:
+                      type: string
         required:
         - spec
   - name: v1beta2
@@ -12691,3 +12701,13 @@ spec:
                           type: array
                           items:
                             type: integer
+              initialControllers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    nodeId:
+                      type: integer
+                      minimum: 0
+                    directoryId:
+                      type: string
