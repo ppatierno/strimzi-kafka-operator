@@ -63,6 +63,9 @@ public class NodeIdAssignor {
             TreeSet<Integer> current;
             TreeSet<Integer> desired;
             TreeSet<Integer> usedToBeBroker;
+            // TODO: usedToBeController can be removed, it's not used anymore by the KafkaPool class
+            TreeSet<Integer> usedToBeController;
+            TreeSet<Integer> becomingController;
             TreeSet<Integer> toBeRemoved = new TreeSet<>();
             TreeSet<Integer> toBeAdded = new TreeSet<>();
 
@@ -98,10 +101,14 @@ public class NodeIdAssignor {
                 }
 
                 usedToBeBroker = brokerNodesBecomingControllerOnlyNodes(pool, current, desired);
+                usedToBeController = controllerNodesBecomingBrokerOnlyNodes(pool, current, desired);
+                becomingController = nodesBecomingControllers(pool, current, desired);
             } else {
                 // New pool? It is all scale-up
                 current = new TreeSet<>();
                 usedToBeBroker = new TreeSet<>();
+                usedToBeController = new TreeSet<>();
+                becomingController = new TreeSet<>();
                 desired = new TreeSet<>();
 
                 // Provides the node IDs which the user would like to assign to the next broker(s)
@@ -114,7 +121,7 @@ public class NodeIdAssignor {
                 }
             }
 
-            assignments.put(pool.getMetadata().getName(), new NodeIdAssignment(current, desired, toBeRemoved, toBeAdded, usedToBeBroker));
+            assignments.put(pool.getMetadata().getName(), new NodeIdAssignment(current, desired, toBeRemoved, toBeAdded, usedToBeBroker, usedToBeController, becomingController));
         }
     }
 
@@ -332,6 +339,56 @@ public class NodeIdAssignor {
             TreeSet<Integer> usedToBeBroker = new TreeSet<>(desired);
             usedToBeBroker.retainAll(current);
             return usedToBeBroker;
+        } else {
+            return new TreeSet<>();
+        }
+    }
+
+    /**
+     * Finds any Kafka nodes that used to have the controller role but should not have it anymore. These nodes require a
+     * special treatment - for example they should be removed from the controller quorum.
+     *
+     * @param pool      Node Pool to check for the roles change
+     * @param current   Current node IDs belonging to this node pool
+     * @param desired   Desired node IDs belonging to this node pool
+     *
+     * @return  Set of node IDs that used to have the controller role but will not have it anymore
+     */
+    /* test */ static TreeSet<Integer> controllerNodesBecomingBrokerOnlyNodes(KafkaNodePool pool, Set<Integer> current, Set<Integer> desired) {
+        if (pool.getStatus() != null
+                && pool.getSpec().getRoles() != null
+                && pool.getStatus().getRoles() != null
+                && pool.getStatus().getRoles().contains(ProcessRoles.CONTROLLER) // Used to have the controller role
+                && !pool.getSpec().getRoles().contains(ProcessRoles.CONTROLLER)) { // But should not have it anymore
+            // Collect all node IDs that are both current and desired (i.e. we do not care about old nodes being scaled down or new nodes being scaled up)
+            TreeSet<Integer> usedToBeController = new TreeSet<>(desired);
+            usedToBeController.retainAll(current);
+            return usedToBeController;
+        } else {
+            return new TreeSet<>();
+        }
+    }
+
+    /**
+     * Finds any Kafka nodes that are gaining the controller role. These nodes require special treatment - for example
+     * they should be registered in the controller quorum.
+     *
+     * @param pool      Node Pool to check for the roles change
+     * @param current   Current node IDs belonging to this node pool
+     * @param desired   Desired node IDs belonging to this node pool
+     *
+     * @return  Set of node IDs that are gaining the controller role
+     */
+    /* test */ static TreeSet<Integer> nodesBecomingControllers(KafkaNodePool pool, Set<Integer> current, Set<Integer> desired) {
+        if (pool.getStatus() != null
+                && pool.getSpec().getRoles() != null
+                && pool.getStatus().getRoles() != null
+                && !pool.getStatus().getRoles().contains(ProcessRoles.CONTROLLER) // Did not have the controller role
+                && pool.getSpec().getRoles().contains(ProcessRoles.CONTROLLER)) { // But should have it now
+            // Collect all node IDs that are both current and desired (i.e. we do not care about old nodes being scaled down or new nodes being scaled up)
+            TreeSet<Integer> becomingController = new TreeSet<>(desired);
+            becomingController.retainAll(current);
+            return becomingController;
         } else {
             return new TreeSet<>();
         }

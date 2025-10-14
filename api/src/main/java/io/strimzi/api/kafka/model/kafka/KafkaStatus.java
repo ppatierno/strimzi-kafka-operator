@@ -27,20 +27,21 @@ import java.util.List;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({ "conditions", "observedGeneration", "listeners", "kafkaNodePools", "registeredNodeIds", "clusterId",
-    "operatorLastSuccessfulVersion", "kafkaVersion", "kafkaMetadataVersion", "kafkaMetadataState", "autoRebalance" })
+    "operatorLastSuccessfulVersion", "kafkaVersion", "kafkaMetadataVersion", "kafkaMetadataState", "autoRebalance", "controllers" })
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 public class KafkaStatus extends Status {
     private List<ListenerStatus> listeners;
     private List<UsedNodePoolStatus> kafkaNodePools;
     private List<Integer> registeredNodeIds;
-    
+
     private String clusterId;
     private String operatorLastSuccessfulVersion;
     private String kafkaVersion;
     private String kafkaMetadataVersion;
     private KafkaMetadataState kafkaMetadataState;
     private KafkaAutoRebalanceStatus autoRebalance;
+    private List<KafkaControllerStatus> controllers;
 
     @Description("Addresses of the internal and external listeners")
     public List<ListenerStatus> getListeners() {
@@ -129,5 +130,14 @@ public class KafkaStatus extends Status {
 
     public void setAutoRebalance(KafkaAutoRebalanceStatus autoRebalance) {
         this.autoRebalance = autoRebalance;
+    }
+
+    @Description("List of controller nodes with their IDs and directory IDs. Used for KRaft quorum management and disaster recovery.")
+    public List<KafkaControllerStatus> getControllers() {
+        return controllers;
+    }
+
+    public void setControllers(List<KafkaControllerStatus> controllers) {
+        this.controllers = controllers;
     }
 }

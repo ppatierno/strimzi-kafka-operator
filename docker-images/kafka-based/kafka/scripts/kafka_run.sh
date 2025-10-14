@@ -58,25 +58,84 @@ echo ""
 # Format the KRaft storage
 STRIMZI_CLUSTER_ID=$(cat "$KAFKA_HOME/custom-config/cluster.id")
 METADATA_VERSION=$(cat "$KAFKA_HOME/custom-config/metadata.version")
+INITIAL_CONTROLLERS=$(cat "$KAFKA_HOME/custom-config/initial.controllers" 2>/dev/null || true)
+
 echo "Making sure the Kraft storage is formatted with cluster ID $STRIMZI_CLUSTER_ID and metadata version $METADATA_VERSION"
+echo "Initial controllers: $INITIAL_CONTROLLERS"
+
 # Using "=" to assign arguments for the Kafka storage tool to avoid issues if the generated
 # cluster ID starts with a "-". See https://issues.apache.org/jira/browse/KAFKA-15754.
 # The -g option makes sure the tool will ignore any volumes that are already formatted.
-./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g
+
+if [ -z "$INITIAL_CONTROLLERS" ]; then
+  # Not using dynamic quorum - use standard formatting
+  echo "Not using dynamic quorum, formatting with standard options"
+  ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g
+else
+  # Using dynamic quorum - check if this node is a controller
+  PROCESS_ROLES=$(grep -Po '(?<=^process.roles=).+' /tmp/strimzi.properties || echo "")
+
+  if [[ "$PROCESS_ROLES" =~ "controller" ]]; then
+    # Get the configured metadata log directory
+    KRAFT_METADATA_LOG_DIR=$(grep "metadata\.log\.dir=" /tmp/strimzi.properties | sed "s/metadata\.log\.dir=*//")
+
+    # Check if metadata exists on a DIFFERENT disk (disk change scenario)
+    DISK_CHANGED=false
+    for CURRENT_DIR in $(ls -d /var/lib/kafka/data-*/kafka-log"$STRIMZI_BROKER_ID"/__cluster_metadata-0 2> /dev/null || true); do
+      # Check if it's on a different disk than the configured one
+      if [[ "$CURRENT_DIR" != $KRAFT_METADATA_LOG_DIR* ]]; then
+        echo "Metadata exists on different disk - disk change detected"
+        DISK_CHANGED=true
+        break
+      fi
+    done
+
+    # Check if it's an initial controller (new cluster) or scale-up
+    # Extract node IDs from INITIAL_CONTROLLERS (format: id@host:port:directory-id,...)
+    INITIAL_CONTROLLER_IDS=$(echo "$INITIAL_CONTROLLERS" | grep -oP '\d+(?=@)' | tr '\n' ' ')
+    echo "Initial controller IDs: $INITIAL_CONTROLLER_IDS"
+
+    if echo "$INITIAL_CONTROLLER_IDS" | grep -qw "$STRIMZI_BROKER_ID"; then
+      if [ "$DISK_CHANGED" = true ]; then
+        # Disk changed - use -N to generate new random directory ID
+        echo "Initial controller with disk change, formatting with -N (new random directory ID)"
+        ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+      else
+        # This node is an initial controller with same disk, so using -I (works for both new cluster and restart)
+        echo "Initial controller, formatting with -I"
+        ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -I="$INITIAL_CONTROLLERS"
+      fi
+    else
+      # This node is NOT an initial controller, so using -N for scale-up
+      echo "Scaling up controller, formatting with -N"
+      ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+    fi
+  else
+    # This is a broker with dynamic quorum, always use -N
+    echo "Broker with dynamic quorum, formatting with -N"
+    ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+  fi
+fi
 echo "KRaft storage formatting is done"
 
 # Manage the metadata log file changes
 KRAFT_METADATA_LOG_DIR=$(grep "metadata\.log\.dir=" /tmp/strimzi.properties | sed "s/metadata\.log\.dir=*//")
-CURRENT_KRAFT_METADATA_LOG_DIR=$(ls -d /var/lib/kafka/data-*/kafka-log"$STRIMZI_BROKER_ID"/__cluster_metadata-0 2> /dev/null || true)
-if [[ -d "$CURRENT_KRAFT_METADATA_LOG_DIR" && "$CURRENT_KRAFT_METADATA_LOG_DIR" != $KRAFT_METADATA_LOG_DIR* ]]; then
-  echo "The desired KRaft metadata log directory ($KRAFT_METADATA_LOG_DIR) and the current one ($CURRENT_KRAFT_METADATA_LOG_DIR) differ. The current directory will be deleted."
-  rm -rf "$CURRENT_KRAFT_METADATA_LOG_DIR"
-else
-  # remove quorum-state file so that we won't enter voter not match error after scaling up/down
-  if [ -f "$KRAFT_METADATA_LOG_DIR/__cluster_metadata-0/quorum-state" ]; then
-    echo "Removing quorum-state file"
-    rm -f "$KRAFT_METADATA_LOG_DIR/__cluster_metadata-0/quorum-state"
+echo "KRAFT_METADATA_LOG_DIR= $KRAFT_METADATA_LOG_DIR"
+
+# Find all existing metadata directories and delete any that don't match the configured one
+# When using -I on formatting, the __cluster_metadata-0 directory is created immediately so there will be the new and the old one which needs to be deleted
+for CURRENT_DIR in $(ls -d /var/lib/kafka/data-*/kafka-log"$STRIMZI_BROKER_ID"/__cluster_metadata-0 2> /dev/null || true); do
+  echo "Found metadata directory: $CURRENT_DIR"
+  if [[ "$CURRENT_DIR" != $KRAFT_METADATA_LOG_DIR* ]]; then
+    echo "The desired KRaft metadata log directory ($KRAFT_METADATA_LOG_DIR) and the current one ($CURRENT_DIR) differ. The current directory will be deleted."
+    rm -rf "$CURRENT_DIR"
   fi
+done
+
+# Remove quorum-state file so that we won't enter voter not match error after scaling up/down
+if [ -f "$KRAFT_METADATA_LOG_DIR/__cluster_metadata-0/quorum-state" ]; then
+  echo "Removing quorum-state file"
+  rm -f "$KRAFT_METADATA_LOG_DIR/__cluster_metadata-0/quorum-state"
 fi
 
 # Generate the Kafka Agent configuration file
@@ -88,6 +147,7 @@ cat <<EOF > /tmp/kafka-agent.properties
 sslTrustStoreSecretName=${KAFKA_CLUSTER_NAME}-cluster-ca-cert
 sslKeyStoreSecretName=${HOSTNAME}
 namespace=${NAMESPACE}
+kraftMetadataLogDir=${KRAFT_METADATA_LOG_DIR}
 EOF
 echo ""
 
