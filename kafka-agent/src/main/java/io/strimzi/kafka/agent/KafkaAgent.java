@@ -68,6 +68,7 @@ public class KafkaAgent {
     private static final Logger LOGGER = LoggerFactory.getLogger(KafkaAgent.class);
     private static final String BROKER_STATE_PATH = "/v1/broker-state";
     private static final String READINESS_ENDPOINT_PATH = "/v1/ready";
+    private static final String DIRECTORY_ID_PATH = "/v1/directory-id";
     private static final int HTTPS_PORT = 8443;
     private static final int HTTP_PORT = 8080;
     private static final long GRACEFUL_SHUTDOWN_TIMEOUT_MS = 30 * 1000;
@@ -81,6 +82,7 @@ public class KafkaAgent {
     static final SecureRandom RANDOM = new SecureRandom();
     private final Secret caCertSecret;
     private final Secret nodeCertSecret;
+    private String kraftMetadataLogDir;
     private MetricName brokerStateName;
     private Gauge brokerState;
     private Gauge remainingLogsToRecover;
@@ -93,10 +95,12 @@ public class KafkaAgent {
      * @param caCertSecretName      CA certificate Secret name
      * @param nodeCertSecretName    Node certificate Secret name
      * @param namespace             Namespace where the Kafka cluster is running
+     * @param kraftMetadataLogDir   KRaft metadata log directory path
      */
-    /* test */ KafkaAgent(KubernetesClient client, String caCertSecretName, String nodeCertSecretName, String namespace) {
+    /* test */ KafkaAgent(KubernetesClient client, String caCertSecretName, String nodeCertSecretName, String namespace, String kraftMetadataLogDir) {
         this.caCertSecret = getKubernetesSecret(client, caCertSecretName, namespace);
         this.nodeCertSecret = getKubernetesSecret(client, nodeCertSecretName, namespace);
+        this.kraftMetadataLogDir = kraftMetadataLogDir;
     }
 
     private Secret getKubernetesSecret(KubernetesClient client, String caCertSecretName, String namespace) {
@@ -222,8 +226,11 @@ public class KafkaAgent {
         ContextHandler readinessContext = new ContextHandler(READINESS_ENDPOINT_PATH);
         readinessContext.setHandler(getReadinessHandler());
 
+        ContextHandler directoryIdContext = new ContextHandler(DIRECTORY_ID_PATH);
+        directoryIdContext.setHandler(getDirectoryIdHandler());
+
         server.setConnectors(new Connector[] {httpsConn, httpConn});
-        server.setHandler(new ContextHandlerCollection(brokerStateContext, readinessContext));
+        server.setHandler(new ContextHandlerCollection(brokerStateContext, readinessContext, directoryIdContext));
 
         server.setStopTimeout(GRACEFUL_SHUTDOWN_TIMEOUT_MS);
         server.setStopAtShutdown(true);
@@ -278,6 +285,60 @@ public class KafkaAgent {
         sslContextFactory.setKeyStorePassword(password);
         sslContextFactory.setNeedClientAuth(true);
         return  sslContextFactory;
+    }
+
+    /**
+     * Creates a Handler instance to handle incoming HTTP requests for directory ID
+     *
+     * @return Handler
+     */
+    /* test */ Handler getDirectoryIdHandler() {
+        return new Handler.Abstract() {
+            @Override
+            public boolean handle(Request request, Response response, Callback callback) throws Exception {
+                try {
+                    String directoryId = readDirectoryIdFromMetaProperties();
+                    response.setStatus(HttpServletResponse.SC_OK);
+                    response.getHeaders().put(HttpHeader.CONTENT_TYPE, "application/json");
+                    String json = String.format("{\"directoryId\":\"%s\"}", directoryId);
+                    response.write(true, StandardCharsets.UTF_8.encode(json), callback);
+                } catch (Exception e) {
+                    LOGGER.error("Error reading directory ID", e);
+                    response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                    response.write(true, StandardCharsets.UTF_8.encode("Error reading directory ID: " + e.getMessage()), callback);
+                }
+                return true;
+            }
+        };
+    }
+
+    /**
+     * Reads the directory ID from meta.properties file
+     *
+     * @return Directory ID as string
+     * @throws IOException if the file cannot be read or directory.id is not found
+     */
+    private String readDirectoryIdFromMetaProperties() throws IOException {
+        // The kraftMetadataLogDir is passed from kafka_run.sh and points to the metadata log directory
+        // e.g., /var/lib/kafka/data-0/kafka-log1
+        // The meta.properties file is located directly in this directory
+        if (kraftMetadataLogDir == null || kraftMetadataLogDir.isEmpty()) {
+            throw new IOException("kraftMetadataLogDir not configured");
+        }
+
+        String metaPropertiesPath = kraftMetadataLogDir + "/meta.properties";
+        LOGGER.debug("Reading directory ID from {}", metaPropertiesPath);
+
+        try (FileInputStream fis = new FileInputStream(metaPropertiesPath)) {
+            Properties props = new Properties();
+            props.load(fis);
+            String dirId = props.getProperty("directory.id");
+            if (dirId == null) {
+                throw new IOException("directory.id not found in meta.properties at " + metaPropertiesPath);
+            }
+            LOGGER.debug("Found directory ID: {}", dirId);
+            return dirId;
+        }
     }
 
     /**
@@ -340,13 +401,15 @@ public class KafkaAgent {
             final String caCertSecretName = agentConfigs.get("sslTrustStoreSecretName");
             final String nodeCertSecretName = agentConfigs.get("sslKeyStoreSecretName");
             final String namespace = agentConfigs.get("namespace");
+            final String kraftMetadataLogDir = agentConfigs.get("kraftMetadataLogDir");
             if (caCertSecretName.isEmpty() || nodeCertSecretName.isEmpty() || namespace.isEmpty()) {
                 LOGGER.error("Missing the required Secret information: sslTrustStoreSecretName={} sslKeyStoreSecretName={} namespace={}", caCertSecretName, nodeCertSecretName, namespace);
                 System.exit(1);
             } else {
-                LOGGER.info("Starting KafkaAgent with sslTrustStoreSecretName={} sslKeyStoreSecretName={} namespace={}", caCertSecretName, nodeCertSecretName, namespace);
+                LOGGER.info("Starting KafkaAgent with sslTrustStoreSecretName={} sslKeyStoreSecretName={} namespace={} kraftMetadataLogDir={}",
+                    caCertSecretName, nodeCertSecretName, namespace, kraftMetadataLogDir);
                 KubernetesClient client = new KubernetesClientBuilder().build();
-                new KafkaAgent(client, caCertSecretName, nodeCertSecretName, namespace).run();
+                new KafkaAgent(client, caCertSecretName, nodeCertSecretName, namespace, kraftMetadataLogDir).run();
             }
         }
     }

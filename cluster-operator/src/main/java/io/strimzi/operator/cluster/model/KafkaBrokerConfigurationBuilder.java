@@ -74,18 +74,37 @@ public class KafkaBrokerConfigurationBuilder {
     private final NodeRef node;
 
     /**
+     * If the Kafka cluster is using Dynamic quorum
+     * (if false, it's using Static quorum)
+     */
+    private final boolean isDynamicQuorum;
+
+    /**
      * Broker configuration template constructor
+     *
+     * @param reconciliation        The reconciliation
+     * @param node                  NodeRef instance
+     * @param isDynamicQuorum       If the Kafka cluster is using Dynamic quorum (if false, it's using Static quorum)
+     */
+    public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node, boolean isDynamicQuorum) {
+        printHeader();
+        this.reconciliation = reconciliation;
+        this.node = node;
+        this.isDynamicQuorum = isDynamicQuorum;
+
+        // Render the node/broker ID into the config file
+        configureNodeOrBrokerId();
+    }
+
+    // TODO: to be removed. leaving this 2 parameters constructor to avoid changing all tests right now
+    /**
+     * Constructor (TO BE REMOVED)
      *
      * @param reconciliation    The reconciliation
      * @param node              NodeRef instance
      */
     public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node) {
-        printHeader();
-        this.reconciliation = reconciliation;
-        this.node = node;
-
-        // Render the node/broker ID into the config file
-        configureNodeOrBrokerId();
+        this(reconciliation, node, false);
     }
 
     /**
@@ -202,13 +221,29 @@ public class KafkaBrokerConfigurationBuilder {
 
         // Generates the controllers quorum list
         // The list should be sorted to avoid random changes to the generated configuration file
-        List<String> quorum = nodes.stream()
-                .filter(NodeRef::controller)
-                .sorted(Comparator.comparingInt(NodeRef::nodeId))
-                .map(node -> String.format("%s@%s:%s", node.nodeId(), DnsNameGenerator.podDnsNameWithoutClusterDomain(namespace, KafkaResources.brokersServiceName(clusterName), node.podName()), KafkaCluster.CONTROLPLANE_PORT))
-                .toList();
-
-        writer.println("controller.quorum.voters=" + String.join(",", quorum));
+        if (isDynamicQuorum) {
+            // Dynamic quorum
+            List<String> quorum = nodes.stream()
+                    .filter(NodeRef::controller)
+                    .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                    .map(node -> String.format("%s:%s", DnsNameGenerator.podDnsNameWithoutClusterDomain(namespace, KafkaResources.brokersServiceName(clusterName), node.podName()), KafkaCluster.CONTROLPLANE_PORT))
+                    .toList();
+            writer.println("controller.quorum.bootstrap.servers=" + String.join(",", quorum));
+            // TODO: to check that Apache Kafka version is at least 4.2? (minimum version with auto join available)
+            /*
+            if (node.controller()) {
+                writer.println("controller.quorum.auto.join.enable=true");
+            }
+            */
+        } else {
+            // Static quorum
+            List<String> quorum = nodes.stream()
+                    .filter(NodeRef::controller)
+                    .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                    .map(node -> String.format("%s@%s:%s", node.nodeId(), DnsNameGenerator.podDnsNameWithoutClusterDomain(namespace, KafkaResources.brokersServiceName(clusterName), node.podName()), KafkaCluster.CONTROLPLANE_PORT))
+                    .toList();
+            writer.println("controller.quorum.voters=" + String.join(",", quorum));
+        }
 
         writer.println();
 

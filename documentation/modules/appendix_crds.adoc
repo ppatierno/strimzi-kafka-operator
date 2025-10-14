@@ -2366,6 +2366,9 @@ Used in: xref:type-Kafka-{context}[`Kafka`]
 |autoRebalance
 |xref:type-KafkaAutoRebalanceStatus-{context}[`KafkaAutoRebalanceStatus`]
 |The status of an auto-rebalancing triggered by a cluster scaling request.
+|controllers
+|xref:type-KafkaControllerStatus-{context}[`KafkaControllerStatus`] array
+|List of controller nodes with their IDs and directory IDs. Used for KRaft quorum management and disaster recovery.
 |====
 
 [id='type-Condition-{context}']
@@ -2499,6 +2502,23 @@ The list contains one of the following:
 * Broker IDs for a current auto-rebalance. 
 * Broker IDs for a queued auto-rebalance (if a previous auto-rebalance is still in progress). 
 
+|====
+
+[id='type-KafkaControllerStatus-{context}']
+= `KafkaControllerStatus` schema reference
+
+Used in: xref:type-KafkaStatus-{context}[`KafkaStatus`]
+
+
+[cols="2,2,3a",options="header"]
+|====
+|Property |Property type |Description
+|id
+|integer
+|The node ID of the controller.
+|directoryId
+|string
+|The directory ID of the controller used for KRaft quorum management.
 |====
 
 [id='type-KafkaConnect-{context}']

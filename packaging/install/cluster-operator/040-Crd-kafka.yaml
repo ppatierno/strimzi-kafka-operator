@@ -4964,6 +4964,15 @@ spec:
                           type: array
                           items:
                             type: integer
+              controllers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    directoryId:
+                      type: string
         required:
         - spec
   - name: v1beta2
@@ -12705,3 +12714,12 @@ spec:
                           type: array
                           items:
                             type: integer
+              controllers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    directoryId:
+                      type: string

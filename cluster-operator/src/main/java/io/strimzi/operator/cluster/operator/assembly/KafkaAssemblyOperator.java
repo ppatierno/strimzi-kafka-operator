@@ -199,6 +199,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     // the auto-rebalance is enabled otherwise I could reset it to null if needed
                     status.setAutoRebalance(kafkaAssembly.getStatus().getAutoRebalance());
                 }
+
+                if (status.getControllers() == null
+                        && kafkaAssembly.getStatus().getControllers() != null)  {
+                    // Copy the controllers if needed for disaster recovery
+                    status.setControllers(kafkaAssembly.getStatus().getControllers());
+                }
             }
 
             if (reconcileResult.succeeded())    {
@@ -700,6 +706,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         // We copy the cluster ID if set
         if (kafka.getStatus() != null && kafka.getStatus().getClusterId() != null)  {
             status.setClusterId(kafka.getStatus().getClusterId());
+        }
+
+        // We copy the controllers if set (for disaster recovery from PVCs)
+        if (kafka.getStatus() != null && kafka.getStatus().getControllers() != null)  {
+            status.setControllers(kafka.getStatus().getControllers());
         }
 
         return status;
