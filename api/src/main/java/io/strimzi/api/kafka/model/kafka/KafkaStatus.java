@@ -41,7 +41,7 @@ public class KafkaStatus extends Status {
     private String kafkaMetadataVersion;
     private KafkaMetadataState kafkaMetadataState;
     private KafkaAutoRebalanceStatus autoRebalance;
-    private List<InitialController> initialControllers;
+    private String initialControllers;
 
     @Description("Addresses of the internal and external listeners")
     public List<ListenerStatus> getListeners() {
@@ -134,11 +134,11 @@ public class KafkaStatus extends Status {
 
     @Description("The initial controllers list when the dynamic quorum is used. " +
             "It's empty when the static quorum is used.")
-    public List<InitialController> getInitialControllers() {
+    public String getInitialControllers() {
         return initialControllers;
     }
 
-    public void setInitialControllers(List<InitialController> initialControllers) {
+    public void setInitialControllers(String initialControllers) {
         this.initialControllers = initialControllers;
     }
 }

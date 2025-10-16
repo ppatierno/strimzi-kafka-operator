@@ -2344,7 +2344,7 @@ Used in: xref:type-Kafka-{context}[`Kafka`]
 |xref:type-KafkaAutoRebalanceStatus-{context}[`KafkaAutoRebalanceStatus`]
 |The status of an auto-rebalancing triggered by a cluster scaling request.
 |initialControllers
-|xref:type-InitialController-{context}[`InitialController`] array
+|string
 |The initial controllers list when the dynamic quorum is used. It's empty when the static quorum is used.
 |====
 
@@ -2479,23 +2479,6 @@ The list contains one of the following:
 * Broker IDs for a current auto-rebalance. 
 * Broker IDs for a queued auto-rebalance (if a previous auto-rebalance is still in progress). 
 
-|====
-
-[id='type-InitialController-{context}']
-= `InitialController` schema reference
-
-Used in: xref:type-KafkaStatus-{context}[`KafkaStatus`]
-
-
-[cols="2,2,3a",options="header"]
-|====
-|Property |Property type |Description
-|nodeId
-|integer
-|Node ID.
-|directoryId
-|string
-|Directory ID.
 |====
 
 [id='type-KafkaConnect-{context}']

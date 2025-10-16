@@ -5572,17 +5572,7 @@ spec:
                     description: "List of modes where an auto-rebalancing operation is either running or queued. \nEach mode entry (`add-brokers` or `remove-brokers`) includes one of the following: \n\n* Broker IDs for a current auto-rebalance. \n* Broker IDs for a queued auto-rebalance (if a previous rebalance is still in progress)."
                 description: The status of an auto-rebalancing triggered by a cluster scaling request.
               initialControllers:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    nodeId:
-                      type: integer
-                      minimum: 0
-                      description: Node ID.
-                    directoryId:
-                      type: string
-                      description: Directory ID.
+                type: string
                 description: The initial controllers list when the dynamic quorum is used. It's empty when the static quorum is used.
             description: The status of the Kafka cluster.
         required:

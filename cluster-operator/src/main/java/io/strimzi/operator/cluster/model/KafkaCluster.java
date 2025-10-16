@@ -52,8 +52,6 @@ import io.strimzi.api.kafka.model.common.template.InternalServiceTemplate;
 import io.strimzi.api.kafka.model.common.template.PodDisruptionBudgetTemplate;
 import io.strimzi.api.kafka.model.common.template.PodTemplate;
 import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
-import io.strimzi.api.kafka.model.kafka.InitialController;
-import io.strimzi.api.kafka.model.kafka.InitialControllerBuilder;
 import io.strimzi.api.kafka.model.kafka.Kafka;
 import io.strimzi.api.kafka.model.kafka.KafkaAuthorization;
 import io.strimzi.api.kafka.model.kafka.KafkaAuthorizationKeycloak;
@@ -89,7 +87,6 @@ import io.strimzi.operator.cluster.model.metrics.SupportsMetrics;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderContextImpl;
 import io.strimzi.operator.common.Annotations;
-import io.strimzi.operator.common.InvalidConfigurationException;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.ClientsCa;
@@ -233,7 +230,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     private KafkaVersion kafkaVersion;
     private String metadataVersion;
     private String clusterId;
-    private List<InitialController> initialControllers;
+    private String initialControllers;
     private JmxModel jmx;
     private CruiseControlMetricsReporter ccMetricsReporter;
     private MetricsModel metrics;
@@ -318,16 +315,11 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
             result.initialControllers = kafka.getStatus().getInitialControllers();
         } else if (result.isNewCluster()) {
             // This is a new cluster, and it will use dynamic quorum so let's gather the initial controllers IDs
-            result.initialControllers = new ArrayList<>();
-            result.controllerNodes().stream()
-                    .sorted(Comparator.comparingInt(NodeRef::nodeId))
-                    .forEach(nodeRef -> {
-                        result.initialControllers.add(
-                                new InitialControllerBuilder()
-                                        .withNodeId(nodeRef.nodeId())
-                                        .withDirectoryId(Uuid.randomUuid().toString())
-                                        .build());
-                    });
+            result.initialControllers =
+                    result.controllerNodes().stream()
+                            .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                            .map(node -> String.format("%s@%s:9090:%s", node.nodeId(), DnsNameGenerator.podDnsName(result.namespace, KafkaResources.brokersServiceName(result.cluster), node.podName()), Uuid.randomUuid().toString()))
+                            .collect(Collectors.joining(","));
         }
         LOGGER.infoCr(reconciliation, "**** initialControllers = {}", result.initialControllers);
 
@@ -1927,10 +1919,8 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                 data.put(BROKER_METADATA_VERSION_FILENAME, metadataVersion);
                 // initial controllers are set for both brokers and controllers when using dynamic quorum
                 // The bash script uses this to determine dynamic quorum usage and appropriate formatting options
-                String initialControllersString = generateInitialControllers();
-                LOGGER.infoCr(reconciliation, "**** initialControllersString = {}", initialControllersString);
-                if (initialControllersString != null) {
-                    data.put(INITIAL_CONTROLLERS_FILENAME, initialControllersString);
+                if (initialControllers != null) {
+                    data.put(INITIAL_CONTROLLERS_FILENAME, initialControllers);
                 }
 
                 configMaps.add(ConfigMapUtils.createConfigMap(node.podName(), namespace, pool.labels.withStrimziPodName(node.podName()), pool.ownerReference, data));
@@ -1970,7 +1960,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     /**
      * @return Initial controllers for dynamic quorum. Null if it's using static quorum.
      */
-    public List<InitialController> getInitialControllers() {
+    public String getInitialControllers() {
         return initialControllers;
     }
 
@@ -2052,33 +2042,6 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         }
 
         return consolidatedWarningConditions;
-    }
-
-    /**
-     * Generates the initial controllers string for dynamic quorum based on the initialControllers IDs
-     *
-     * @return  Comma-separated string of initial controllers in format: nodeId@dnsName:9090:directoryId
-     */
-    private String generateInitialControllers() {
-        if (initialControllers == null || initialControllers.isEmpty()) {
-            return null;
-        }
-
-        return initialControllers.stream()
-                .sorted(Comparator.comparingInt(InitialController::getNodeId))
-                .map(initialController -> {
-                    // Find the NodeRef for this controller ID
-                    NodeRef node = controllerNodes().stream()
-                            .filter(n -> n.nodeId() == initialController.getNodeId())
-                            .findFirst()
-                            .orElseThrow(() -> new InvalidConfigurationException("Controller node with ID " + initialController.getNodeId() + " not found"));
-
-                    return String.format("%s@%s:9090:%s",
-                            node.nodeId(),
-                            DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(cluster), node.podName()),
-                            initialController.getDirectoryId());
-                })
-                .collect(Collectors.joining(","));
     }
 
     /**
