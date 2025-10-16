@@ -4953,15 +4953,7 @@ spec:
                           items:
                             type: integer
               initialControllers:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    nodeId:
-                      type: integer
-                      minimum: 0
-                    directoryId:
-                      type: string
+                type: string
         required:
         - spec
   - name: v1beta2
@@ -12682,12 +12674,4 @@ spec:
                           items:
                             type: integer
               initialControllers:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    nodeId:
-                      type: integer
-                      minimum: 0
-                    directoryId:
-                      type: string
+                type: string

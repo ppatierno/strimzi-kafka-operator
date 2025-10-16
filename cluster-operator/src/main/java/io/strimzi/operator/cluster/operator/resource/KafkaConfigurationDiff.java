@@ -86,6 +86,7 @@ public class KafkaConfigurationDiff extends AbstractJsonDiff {
             "controlled.shutdown.retry.backoff.ms",
             "controller.listener.names",
             "controller.quorum.append.linger.ms",
+            "controller.quorum.bootstrap.servers",
             "controller.quorum.election.backoff.max.ms",
             "controller.quorum.election.timeout.ms",
             "controller.quorum.fetch.timeout.ms",

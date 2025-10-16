@@ -7,7 +7,6 @@ package io.strimzi.operator.cluster.model;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.strimzi.api.kafka.model.common.CertAndKeySecretSource;
 import io.strimzi.api.kafka.model.common.Rack;
-import io.strimzi.api.kafka.model.kafka.InitialController;
 import io.strimzi.api.kafka.model.kafka.KafkaAuthorization;
 import io.strimzi.api.kafka.model.kafka.KafkaAuthorizationCustom;
 import io.strimzi.api.kafka.model.kafka.KafkaAuthorizationKeycloak;
@@ -78,7 +77,7 @@ public class KafkaBrokerConfigurationBuilder {
      * Initial controllers list when using dynamic quorum.
      * It's null when static quorum is used.
      */
-    private final List<InitialController> initialControllers;
+    private final String initialControllers;
 
     /**
      * Broker configuration template constructor
@@ -88,7 +87,7 @@ public class KafkaBrokerConfigurationBuilder {
      * @param initialControllers    Initial controllers list when using dynamic quorum.
      *                              It's null when static quorum is used.
      */
-    public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node, List<InitialController> initialControllers) {
+    public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node, String initialControllers) {
         printHeader();
         this.reconciliation = reconciliation;
         this.node = node;
@@ -224,21 +223,15 @@ public class KafkaBrokerConfigurationBuilder {
         // Generates the controllers quorum list
         // The list should be sorted to avoid random changes to the generated configuration file
         if (initialControllers != null && !initialControllers.isEmpty()) {
-            // Dynamic quorum, use only the initial controllers
-            List<String> quorum = initialControllers.stream()
-                    .sorted(Comparator.comparingInt(InitialController::getNodeId))
-                    .map(initialController -> {
-                        // Find the NodeRef for this controller ID
-                        NodeRef controllerNode = nodes.stream()
-                                .filter(n -> n.nodeId() == initialController.getNodeId())
-                                .findFirst()
-                                .orElseThrow(() -> new InvalidConfigurationException("Controller node with ID " + initialController.getNodeId() + " not found"));
-                        return String.format("%s:9090", DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(clusterName), controllerNode.podName()));
-                    })
+            // Dynamic quorum
+            List<String> quorum = nodes.stream()
+                    .filter(NodeRef::controller)
+                    .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                    .map(node -> String.format("%s:9090", DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(clusterName), node.podName())))
                     .toList();
             writer.println("controller.quorum.bootstrap.servers=" + String.join(",", quorum));
         } else {
-            // Static quorum, use all controller nodes
+            // Static quorum
             List<String> quorum = nodes.stream()
                     .filter(NodeRef::controller)
                     .sorted(Comparator.comparingInt(NodeRef::nodeId))
