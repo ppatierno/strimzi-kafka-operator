@@ -1068,29 +1068,26 @@ public class KafkaReconciler {
         Set<NodeRef> scaledDownControllerNodes = kafka.removedControllers();
         LOGGER.infoCr(reconciliation, "**** ScaledDown controllers = {}", scaledDownControllerNodes);
         if (!scaledDownControllerNodes.isEmpty()) {
-            return KafkaNodeUnregistration.unregisterControllerNode(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledDownControllerNodes.stream().findFirst().get());
+            return KafkaNodeUnregistration.unregisterControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledDownControllerNodes);
         } else {
             return Future.succeededFuture();
         }
     }
 
     protected Future<Void> controllerRegistration() {
-        // gather all the desired controllers' ids across the entire cluster accounting all node pools
-        Set<Integer> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).map(NodeRef::nodeId).collect(Collectors.toSet());
+        // gather all the desired controllers across the entire cluster accounting all node pools
+        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
 
-        // gather all the added brokers' ids across the entire cluster accounting all node pools
-        Set<Integer> addedControllers = kafka.addedNodes().stream().filter(NodeRef::controller).map(NodeRef::nodeId).collect(Collectors.toSet());
+        // gather all the added brokers across the entire cluster accounting all node pools
+        Set<NodeRef> addedControllers = kafka.addedNodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
 
         // if added controllers list contains all desired, it's a newly created cluster so there are no actual scaled up brokers.
         // when added controllers list has fewer nodes than desired, it actually contains the new ones for scaling up
-        Set<Integer> scaledUpControllerNodes = addedControllers.containsAll(desiredControllers) ? Set.of() : addedControllers;
+        Set<NodeRef> scaledUpControllerNodes = addedControllers.containsAll(desiredControllers) ? Set.of() : addedControllers;
 
         LOGGER.infoCr(reconciliation, "**** ScaledUp controllers = {}", scaledUpControllerNodes);
         if (!scaledUpControllerNodes.isEmpty()) {
-            NodeRef controllerToRegister = kafka.addedNodes().stream()
-                    .filter(nodeRef -> nodeRef.nodeId() == scaledUpControllerNodes.stream().findFirst().get())
-                    .findFirst().get();
-            return KafkaNodeUnregistration.registerControllerNode(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), controllerToRegister);
+            return KafkaNodeUnregistration.registerControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledUpControllerNodes);
         } else {
             return Future.succeededFuture();
         }
