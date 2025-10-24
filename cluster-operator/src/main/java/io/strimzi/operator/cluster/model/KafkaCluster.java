@@ -477,6 +477,23 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     }
 
     /**
+     * Generates list of Kafka controller nodes that are going to be removed from the Kafka cluster.
+     *
+     * @return  Set of Kafka controller nodes which are going to be removed
+     */
+    public Set<NodeRef> removedControllers() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            if (pool.isController()) {
+                nodes.addAll(pool.scaledDownNodes());
+            }
+        }
+
+        return nodes;
+    }
+
+    /**
      * Generates list of Kafka node IDs that used to have the broker role but do not have it anymore.
      *
      * @return  Set of Kafka node IDs which are removing the broker role

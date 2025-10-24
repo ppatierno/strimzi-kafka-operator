@@ -5,7 +5,9 @@
 package io.strimzi.operator.cluster.operator.assembly;
 
 import io.strimzi.api.kafka.model.kafka.KafkaResources;
+import io.strimzi.operator.cluster.model.DnsNameGenerator;
 import io.strimzi.operator.cluster.model.KafkaCluster;
+import io.strimzi.operator.cluster.model.NodeRef;
 import io.strimzi.operator.cluster.operator.VertxUtil;
 import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.Reconciliation;
@@ -16,6 +18,8 @@ import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.DescribeClusterOptions;
+import org.apache.kafka.clients.admin.QuorumInfo;
+import org.apache.kafka.clients.admin.RaftVoterEndpoint;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
 
@@ -27,6 +31,7 @@ import java.util.Set;
 /**
  * Contains utility methods for unregistering KRaft nodes from a Kafka cluster after scale-down
  */
+// TODO: class to be renamed because it handls controllers registration as well
 public class KafkaNodeUnregistration {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaNodeUnregistration.class.getName());
 
@@ -132,5 +137,125 @@ public class KafkaNodeUnregistration {
                 .onFailure(t -> {
                     LOGGER.warnCr(reconciliation, "Failed to unregister node {} from the Kafka cluster", nodeIdToUnregister, t);
                 });
+    }
+
+    /**
+     * Register a new KRaft controller
+     *
+     * @param reconciliation            Reconciliation marker
+     * @param vertx                     Vert.x instance
+     * @param adminClientProvider       Kafka Admin API client provider
+     * @param pemTrustSet               Trust set for the admin client to connect to the Kafka cluster
+     * @param pemAuthIdentity           Key set  for the admin client to connect to the Kafka cluster
+     * @param controllerToRegister      NodeRef of the KRaft controller to be registered
+     * @return  Future that completes when the KRaft controller is registered
+     */
+    public static Future<Void> registerControllerNode(
+            Reconciliation reconciliation,
+            Vertx vertx,
+            AdminClientProvider adminClientProvider,
+            PemTrustSet pemTrustSet,
+            PemAuthIdentity pemAuthIdentity,
+            NodeRef controllerToRegister) {
+        LOGGER.infoCr(reconciliation, "Registering controller node {}", controllerToRegister.nodeId());
+
+        try {
+            String bootstrapHostname = KafkaResources.bootstrapServiceName(reconciliation.name()) + "." + reconciliation.namespace() + ".svc:" + KafkaCluster.REPLICATION_PORT;
+            Admin adminClient = adminClientProvider.createAdminClient(bootstrapHostname, pemTrustSet, pemAuthIdentity);
+
+            return VertxUtil
+                    .kafkaFutureToVertxFuture(reconciliation, vertx, adminClient.describeMetadataQuorum().quorumInfo())
+                    .compose(quorumInfo -> {
+                        QuorumInfo.ReplicaState controllerState = quorumInfo.observers().stream()
+                                .filter(replicaState -> replicaState.replicaId() == controllerToRegister.nodeId())
+                                .findFirst().orElse(null);
+                        if (controllerState != null) {
+                            LOGGER.infoCr(reconciliation, "Controller node {} directory Id = {}", controllerToRegister.nodeId(), controllerState.replicaDirectoryId());
+
+                            // Construct the controller endpoint (advertised listener) since observers are not in quorumInfo.nodes()
+                            String host = DnsNameGenerator.podDnsNameWithoutClusterDomain(
+                                    reconciliation.namespace(),
+                                    KafkaResources.brokersServiceName(reconciliation.name()),
+                                    controllerToRegister.podName());
+
+                            // TODO: avoiding hard-coded listener and port?
+                            RaftVoterEndpoint endpoint = new RaftVoterEndpoint("CONTROLPLANE-9090", host, 9090);
+
+                            LOGGER.infoCr(reconciliation, "Constructed controller endpoint = {}", endpoint);
+
+                            return VertxUtil
+                                    .kafkaFutureToVertxFuture(reconciliation, vertx,
+                                            adminClient.addRaftVoter(controllerToRegister.nodeId(), controllerState.replicaDirectoryId(), Set.of(endpoint)).all());
+                        } else {
+                            LOGGER.warnCr(reconciliation, "Failed to get quorum info for controller node {} from the Kafka cluster", controllerToRegister.nodeId());
+                            return Future.succeededFuture();
+                        }
+                    })
+                    .eventually(() -> {
+                        adminClient.close();
+                        return Future.succeededFuture();
+                    })
+                    .onSuccess(v -> LOGGER.infoCr(reconciliation, "Controller node {} successfully registerd", controllerToRegister.nodeId()))
+                    .onFailure(t -> LOGGER.warnCr(reconciliation, "Failed to register controller node {} from the Kafka cluster", controllerToRegister.nodeId(), t));
+        } catch (KafkaException e) {
+            LOGGER.warnCr(reconciliation, "Failed to register controller", e);
+            return Future.failedFuture(e);
+        }
+    }
+
+    /**
+     * Unregister a KRaft controller from the quorum
+     *
+     * @param reconciliation            Reconciliation marker
+     * @param vertx                     Vert.x instance
+     * @param adminClientProvider       Kafka Admin API client provider
+     * @param pemTrustSet               Trust set for the admin client to connect to the Kafka cluster
+     * @param pemAuthIdentity           Key set  for the admin client to connect to the Kafka cluster
+     * @param controllerToUnregister  NodeRef of the KRaft controller to be unregistered
+     * @return  Future that completes when the KRaft controller is unregistered
+     */
+    public static Future<Void> unregisterControllerNode(
+            Reconciliation reconciliation,
+            Vertx vertx,
+            AdminClientProvider adminClientProvider,
+            PemTrustSet pemTrustSet,
+            PemAuthIdentity pemAuthIdentity,
+            NodeRef controllerToUnregister) {
+        LOGGER.infoCr(reconciliation, "Unregistering controller node {}", controllerToUnregister.nodeId());
+
+        try {
+            String bootstrapHostname = KafkaResources.bootstrapServiceName(reconciliation.name()) + "." + reconciliation.namespace() + ".svc:" + KafkaCluster.REPLICATION_PORT;
+            Admin adminClient = adminClientProvider.createAdminClient(bootstrapHostname, pemTrustSet, pemAuthIdentity);
+
+            return VertxUtil
+                    .kafkaFutureToVertxFuture(reconciliation, vertx, adminClient.describeMetadataQuorum().quorumInfo())
+                    .compose(quorumInfo -> {
+                        QuorumInfo.ReplicaState controllerState = quorumInfo.voters().stream()
+                                .filter(replicaState -> replicaState.replicaId() == controllerToUnregister.nodeId())
+                                .findFirst().orElse(null);
+                        if (controllerState != null) {
+                            LOGGER.infoCr(reconciliation, "Controller node {} directory Id = {}", controllerToUnregister.nodeId(), controllerState.replicaDirectoryId());
+
+                            return VertxUtil
+                                    .kafkaFutureToVertxFuture(reconciliation, vertx,
+                                            adminClient.removeRaftVoter(controllerToUnregister.nodeId(), controllerState.replicaDirectoryId()).all())
+                                    .onFailure(t -> {
+                                        LOGGER.warnCr(reconciliation, "Failed to unregister controller node {} from the Kafka cluster", controllerToUnregister.nodeId(), t);
+                                    });
+                        } else {
+                            LOGGER.warnCr(reconciliation, "Failed to get quorum info for controller node {} from the Kafka cluster", controllerToUnregister.nodeId());
+                            return Future.succeededFuture();
+                        }
+                    })
+                    .eventually(() -> {
+                        adminClient.close();
+                        return Future.succeededFuture();
+                    })
+                    .onSuccess(v -> LOGGER.infoCr(reconciliation, "Controller node {} successfully unregistered", controllerToUnregister.nodeId()))
+                    .onFailure(t -> LOGGER.warnCr(reconciliation, "Failed to unregister controller node {} from the Kafka cluster", controllerToUnregister.nodeId(), t));
+        } catch (KafkaException e) {
+            LOGGER.warnCr(reconciliation, "Failed to unregister controller", e);
+            return Future.failedFuture(e);
+        }
     }
 }
