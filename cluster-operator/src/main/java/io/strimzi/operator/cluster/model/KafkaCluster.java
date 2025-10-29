@@ -509,6 +509,36 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     }
 
     /**
+     * Generates list of references to Kafka nodes that used to have the controller role but do not have it anymore.
+     *
+     * @return  Set of Kafka node references which are removing the controller role
+     */
+    public Set<NodeRef> usedToBeControllerNodes() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            nodes.addAll(pool.usedToBeControllerNodes());
+        }
+
+        return nodes;
+    }
+
+    /**
+     * Generates list of references to Kafka nodes that are gaining the controller role.
+     *
+     * @return  Set of Kafka node references which are gaining the controller role
+     */
+    public Set<NodeRef> becomingControllerNodes() {
+        Set<NodeRef> nodes = new LinkedHashSet<>();
+
+        for (KafkaPool pool : nodePools)    {
+            nodes.addAll(pool.becomingControllerNodes());
+        }
+
+        return nodes;
+    }
+
+    /**
      * Generates list of references to Kafka nodes for this Kafka cluster which have the broker role. The references
      * contain both the pod name and the ID of the Kafka node. This includes only the broker nodes. Controller nodes
      * are not included in this set.

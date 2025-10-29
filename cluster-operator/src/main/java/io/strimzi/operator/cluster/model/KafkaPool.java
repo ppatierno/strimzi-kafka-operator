@@ -351,4 +351,28 @@ public class KafkaPool extends AbstractModel {
     public Set<Integer> usedToBeBrokerNodes() {
         return idAssignment.usedToBeBroker();
     }
+
+    /**
+     * @return  Set of Kafka nodes that used to have the controller role but do not have it anymore.
+     *          The NodeRef objects reflect the OLD roles (with controller=true) since these nodes
+     *          were controllers and need special processing (e.g., removal from controller quorum).
+     */
+    public Set<NodeRef> usedToBeControllerNodes() {
+        return idAssignment.usedToBeController()
+                .stream()
+                .map(nodeId -> new NodeRef(componentName + "-" + nodeId, nodeId, poolName, true, isBroker()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * @return  Set of Kafka nodes that are gaining the controller role.
+     *          The NodeRef objects reflect the NEW roles (with controller=true) since these nodes
+     *          need special processing (e.g., registration in the controller quorum).
+     */
+    public Set<NodeRef> becomingControllerNodes() {
+        return idAssignment.becomingController()
+                .stream()
+                .map(nodeId -> new NodeRef(componentName + "-" + nodeId, nodeId, poolName, true, isBroker()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
 }

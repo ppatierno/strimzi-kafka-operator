@@ -1065,7 +1065,9 @@ public class KafkaReconciler {
     }
 
     protected Future<Void> controllerUnregistration() {
-        Set<NodeRef> scaledDownControllerNodes = kafka.removedControllers();
+        Set<NodeRef> scaledDownControllerNodes = new HashSet<>();
+        scaledDownControllerNodes.addAll(kafka.removedControllers());
+        scaledDownControllerNodes.addAll(kafka.usedToBeControllerNodes());
         LOGGER.infoCr(reconciliation, "**** ScaledDown controllers = {}", scaledDownControllerNodes);
         if (!scaledDownControllerNodes.isEmpty()) {
             return KafkaNodeUnregistration.unregisterControllerNodes(reconciliation, vertx, adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(), scaledDownControllerNodes);
@@ -1083,7 +1085,11 @@ public class KafkaReconciler {
 
         // if added controllers list contains all desired, it's a newly created cluster so there are no actual scaled up brokers.
         // when added controllers list has fewer nodes than desired, it actually contains the new ones for scaling up
-        Set<NodeRef> scaledUpControllerNodes = addedControllers.containsAll(desiredControllers) ? Set.of() : addedControllers;
+        Set<NodeRef> scaledUpNewControllerNodes = addedControllers.containsAll(desiredControllers) ? Set.of() : addedControllers;
+
+        Set<NodeRef> scaledUpControllerNodes = new HashSet<>();
+        scaledUpControllerNodes.addAll(scaledUpNewControllerNodes);
+        scaledUpControllerNodes.addAll(kafka.becomingControllerNodes());
 
         LOGGER.infoCr(reconciliation, "**** ScaledUp controllers = {}", scaledUpControllerNodes);
         if (!scaledUpControllerNodes.isEmpty()) {
