@@ -4965,8 +4965,6 @@ spec:
                             type: array
                             items:
                               type: integer
-                initialControllers:
-                  type: string
                 controllerDirectoryIds:
                   additionalProperties:
                     type: string
@@ -12712,8 +12710,6 @@ spec:
                             type: array
                             items:
                               type: integer
-                initialControllers:
-                  type: string
                 controllerDirectoryIds:
                   additionalProperties:
                     type: string

@@ -167,8 +167,7 @@ public class KafkaReconciler {
     private final List<String> secretsToDelete = new ArrayList<>();
     /* test */ TlsPemIdentity coTlsPemIdentity;
     /* test */ KafkaListenersReconciler.ReconciliationResult listenerReconciliationResults; // Result of the listener reconciliation with the listener details
-    /* test */ Map<String, String> controllerDirectoryIds; // Controller directory IDs from quorum reconciliation
-    private final Map<String, String> statusControllerDirectoryIds; // Controller directory IDs from Kafka CR status at reconciliation start
+    /* test */ Map<String, String> controllerDirectoryIds; // Controller directory IDs to write to status (from model on new cluster, from quorum query on existing cluster)
 
     private final KafkaAutoRebalanceStatus kafkaAutoRebalanceStatus;
 
@@ -215,9 +214,6 @@ public class KafkaReconciler {
         this.imagePullSecrets = config.getImagePullSecrets();
         this.isPodDisruptionBudgetGeneration = config.isPodDisruptionBudgetGeneration();
         this.kafkaAutoRebalanceStatus = kafkaCr.getStatus() != null ? kafkaCr.getStatus().getAutoRebalance() : null;
-        this.statusControllerDirectoryIds = kafkaCr.getStatus() != null && kafkaCr.getStatus().getControllerDirectoryIds() != null
-                ? kafkaCr.getStatus().getControllerDirectoryIds()
-                : new HashMap<>();
 
         this.strimziPodSetOperator = supplier.strimziPodSetOperator;
         this.secretOperator = supplier.secretOperations;
@@ -1332,7 +1328,17 @@ public class KafkaReconciler {
      * Reconciles the KRaft quorum by registering and unregistering controllers
      */
     protected Future<Void> reconcileKRaftQuorum(boolean skipRoleChanging) {
+        // Skip quorum reconciliation for static quorum clusters
+        if (kafka.getControllerDirectoryIds() == null) {
+            LOGGER.infoCr(reconciliation, "Static quorum cluster - skipping KRaft quorum reconciliation");
+            return Future.succeededFuture();
+        }
+
         if (kafka.currentControllers().isEmpty()) {
+            // New cluster or no controllers exist yet - Kafka not running, can't query quorum
+            // Use the directory IDs from the model (generated when creating initialControllers)
+            controllerDirectoryIds = new HashMap<>(kafka.getControllerDirectoryIds());
+            LOGGER.infoCr(reconciliation, "New cluster - using generated directory IDs from model: {}", controllerDirectoryIds);
             return Future.succeededFuture();
         }
 
@@ -1416,7 +1422,7 @@ public class KafkaReconciler {
         List<Future<Void>> analysisFutures = new ArrayList<>();
 
         for (NodeRef controller : desiredControllers) {
-            Future<Void> analysisFuture = analyzeControllerNode(controller, quorumInfo, statusControllerDirectoryIds, toRegister, toUnregister);
+            Future<Void> analysisFuture = analyzeControllerNode(controller, quorumInfo, kafka.getControllerDirectoryIds(), toRegister, toUnregister);
             analysisFutures.add(analysisFuture);
         }
 
@@ -1684,7 +1690,6 @@ public class KafkaReconciler {
     /* test */ Future<Void> updateKafkaStatus(KafkaStatus kafkaStatus) {
         kafkaStatus.setListeners(listenerReconciliationResults.listenerStatuses);
         kafkaStatus.setKafkaVersion(kafka.getKafkaVersion().version());
-        kafkaStatus.setInitialControllers(kafka.getInitialControllers());
         kafkaStatus.setControllerDirectoryIds(controllerDirectoryIds);
 
         return Future.succeededFuture();

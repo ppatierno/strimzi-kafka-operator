@@ -229,7 +229,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     private KafkaVersion kafkaVersion;
     private String metadataVersion;
     private String clusterId;
-    private String initialControllers;
+    private Map<String, String> controllerDirectoryIds;
     private JmxModel jmx;
     private CruiseControlMetricsReporter ccMetricsReporter;
     private MetricsModel metrics;
@@ -293,7 +293,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      *
      * @return Kafka cluster instance
      */
-    @SuppressWarnings({"NPathComplexity", "deprecation", "MethodLength"}) // Keycloak Authorization is deprecated; resource configuration in Kafka CR (.spec.kafka.resources) is deprecated
+    @SuppressWarnings({"NPathComplexity", "deprecation", "MethodLength", "CyclomaticComplexity"}) // Keycloak Authorization is deprecated; resource configuration in Kafka CR (.spec.kafka.resources) is deprecated
     public static KafkaCluster fromCrd(Reconciliation reconciliation,
                                        Kafka kafka,
                                        List<KafkaPool> pools,
@@ -330,34 +330,37 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         //}
         */
 
-        // NEW CODE - Generate initial controllers configuration for KRaft mode
-        // For each controller node:
-        // - If directory ID is in status, use it (existing controller or disaster recovery)
-        // - If NOT in status, generate a new random UUID (new controller being added)
-        Map<String, String> statusDirIds = kafka.getStatus() != null && kafka.getStatus().getControllerDirectoryIds() != null
-                ? kafka.getStatus().getControllerDirectoryIds()
-                : new HashMap<>();
+        if (kafka.getStatus() == null || kafka.getStatus().getControllerDirectoryIds() != null) {
+            // NEW CODE - Build controller directory IDs for KRaft dynamic quorum mode
+            // For each controller node:
+            // - If directory ID is in status, use it (existing controller or disaster recovery)
+            // - If NOT in status, generate a new random UUID (new controller being added)
+            Map<String, String> statusDirIds = kafka.getStatus() != null && kafka.getStatus().getControllerDirectoryIds() != null
+                    ? kafka.getStatus().getControllerDirectoryIds()
+                    : new HashMap<>();
 
-        result.initialControllers =
-                result.controllerNodes().stream()
-                        .sorted(Comparator.comparingInt(NodeRef::nodeId))
-                        .map(node -> {
-                            // Check if this controller's directory ID is in the status
-                            String directoryId = statusDirIds.get(String.valueOf(node.nodeId()));
-                            if (directoryId == null) {
-                                // New controller - generate random UUID
-                                directoryId = Uuid.randomUuid().toString();
-                            }
-                            // If directoryId is in status, use it (existing controller or disaster recovery)
-                            return String.format("%s@%s:9090:%s",
-                                    node.nodeId(),
-                                    DnsNameGenerator.podDnsName(result.namespace,
-                                            KafkaResources.brokersServiceName(result.cluster),
-                                            node.podName()),
-                                    directoryId);
-                        })
-                        .collect(Collectors.joining(","));
-        LOGGER.infoCr(reconciliation, "**** initialControllers = {}", result.initialControllers);
+            // Build the desired controller directory IDs map by merging:
+            // 1. Directory IDs from status (for existing controllers - preserved across reconciliations)
+            // 2. New random UUIDs (for newly added controllers - scale up scenario)
+            // 3. Excluding controllers that are in status but not in desired (scale down scenario)
+            // This map represents the desired state for this reconciliation
+            result.controllerDirectoryIds = new HashMap<>();
+
+            for (NodeRef controller : result.controllerNodes()) {
+                String nodeIdStr = String.valueOf(controller.nodeId());
+                // Try to get directory ID from status (existing controller)
+                String directoryId = statusDirIds.get(nodeIdStr);
+                if (directoryId == null) {
+                    // Not in status - this is a new controller being added (scale up)
+                    // Generate a new random UUID that will be used when formatting the node
+                    directoryId = Uuid.randomUuid().toString();
+                }
+                // Store in the desired directory IDs map - only desired controllers are included
+                // Controllers that were removed (scale down) won't be in this map
+                result.controllerDirectoryIds.put(nodeIdStr, directoryId);
+            }
+        }
+        LOGGER.infoCr(reconciliation, "**** controllerDirectoryIds = {}", result.controllerDirectoryIds);
 
         // This also validates that the Kafka version is supported
         result.kafkaVersion = versions.supportedVersion(kafkaClusterSpec.getVersion());
@@ -1938,7 +1941,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      * @return  String with the Kafka broker configuration
      */
     private String generatePerBrokerConfiguration(NodeRef node, KafkaPool pool, Map<Integer, Map<String, String>> advertisedHostnames, Map<Integer, Map<String, String>> advertisedPorts)   {
-        return new KafkaBrokerConfigurationBuilder(reconciliation, node, initialControllers)
+        return new KafkaBrokerConfigurationBuilder(reconciliation, node, controllerDirectoryIds != null)
                 .withRackId(rack)
                 .withKRaft(cluster, namespace, nodes())
                 .withKRaftMetadataLogDir(VolumeUtils.kraftMetadataPath(pool.storage))
@@ -1994,6 +1997,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                 data.put(BROKER_METADATA_VERSION_FILENAME, metadataVersion);
                 // initial controllers are set for both brokers and controllers when using dynamic quorum
                 // The bash script uses this to determine dynamic quorum usage and appropriate formatting options
+                String initialControllers = buildInitialControllersString();
                 if (initialControllers != null) {
                     data.put(INITIAL_CONTROLLERS_FILENAME, initialControllers);
                 }
@@ -2004,6 +2008,31 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         }
 
         return configMaps;
+    }
+
+    /**
+     * Builds the initial controllers string from the controller directory IDs map.
+     * Format: "id@host:port:directoryId,id@host:port:directoryId,..."
+     *
+     * @return Initial controllers string for dynamic quorum, or null if not using dynamic quorum
+     */
+    private String buildInitialControllersString() {
+        if (controllerDirectoryIds == null || controllerDirectoryIds.isEmpty()) {
+            return null;
+        }
+
+        return controllerNodes().stream()
+                .sorted(Comparator.comparingInt(NodeRef::nodeId))
+                .map(node -> {
+                    String directoryId = controllerDirectoryIds.get(String.valueOf(node.nodeId()));
+                    return String.format("%s@%s:9090:%s",
+                            node.nodeId(),
+                            DnsNameGenerator.podDnsName(namespace,
+                                    KafkaResources.brokersServiceName(cluster),
+                                    node.podName()),
+                            directoryId);
+                })
+                .collect(Collectors.joining(","));
     }
 
     /**
@@ -2025,12 +2054,16 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     }
 
     /**
-     * Gets the Initial controllers for dynamic quorum. Null if it's using static quorum.
+     * Gets the desired controller directory IDs for this cluster.
+     * This map contains directory IDs for all desired controllers, merged from:
+     * - Existing directory IDs from status (for existing controllers)
+     * - Newly generated random UUIDs (for new controllers being added)
+     * Controllers that were removed are not included in this map.
      *
-     * @return Initial controllers for dynamic quorum. Null if it's using static quorum.
+     * @return Map of controller node ID to directory ID, or null if using static quorum
      */
-    public String getInitialControllers() {
-        return initialControllers;
+    public Map<String, String> getControllerDirectoryIds() {
+        return controllerDirectoryIds;
     }
 
     /**

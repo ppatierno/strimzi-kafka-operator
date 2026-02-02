@@ -28,7 +28,7 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({ "conditions", "observedGeneration", "listeners", "kafkaNodePools", "registeredNodeIds", "clusterId",
-    "operatorLastSuccessfulVersion", "kafkaVersion", "kafkaMetadataVersion", "kafkaMetadataState", "autoRebalance", "initialControllers", "controllerDirectoryIds" })
+    "operatorLastSuccessfulVersion", "kafkaVersion", "kafkaMetadataVersion", "kafkaMetadataState", "autoRebalance", "controllerDirectoryIds" })
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 public class KafkaStatus extends Status {
@@ -42,7 +42,6 @@ public class KafkaStatus extends Status {
     private String kafkaMetadataVersion;
     private KafkaMetadataState kafkaMetadataState;
     private KafkaAutoRebalanceStatus autoRebalance;
-    private String initialControllers;
     private Map<String, String> controllerDirectoryIds;
 
     @Description("Addresses of the internal and external listeners")
@@ -132,16 +131,6 @@ public class KafkaStatus extends Status {
 
     public void setAutoRebalance(KafkaAutoRebalanceStatus autoRebalance) {
         this.autoRebalance = autoRebalance;
-    }
-
-    @Description("The initial controllers list when the dynamic quorum is used. " +
-            "It's empty when the static quorum is used.")
-    public String getInitialControllers() {
-        return initialControllers;
-    }
-
-    public void setInitialControllers(String initialControllers) {
-        this.initialControllers = initialControllers;
     }
 
     @Description("Map of controller node IDs to their directory IDs. Used for KRaft quorum management and disaster recovery.")

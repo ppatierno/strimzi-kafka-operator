@@ -74,24 +74,23 @@ public class KafkaBrokerConfigurationBuilder {
     private final NodeRef node;
 
     /**
-     * Initial controllers list when using dynamic quorum.
-     * It's null when static quorum is used.
+     * If the Kafka cluster is using Dynamic quorum
+     * (if false, it's using Static quorum)
      */
-    private final String initialControllers;
+    private final boolean isDynamicQuorum;
 
     /**
      * Broker configuration template constructor
      *
      * @param reconciliation        The reconciliation
      * @param node                  NodeRef instance
-     * @param initialControllers    Initial controllers list when using dynamic quorum.
-     *                              It's null when static quorum is used.
+     * @param isDynamicQuorum       If the Kafka cluster is using Dynamic quorum (if false, it's using Static quorum)
      */
-    public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node, String initialControllers) {
+    public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node, boolean isDynamicQuorum) {
         printHeader();
         this.reconciliation = reconciliation;
         this.node = node;
-        this.initialControllers = initialControllers;
+        this.isDynamicQuorum = isDynamicQuorum;
 
         // Render the node/broker ID into the config file
         configureNodeOrBrokerId();
@@ -105,7 +104,7 @@ public class KafkaBrokerConfigurationBuilder {
      * @param node              NodeRef instance
      */
     public KafkaBrokerConfigurationBuilder(Reconciliation reconciliation, NodeRef node) {
-        this(reconciliation, node, null);
+        this(reconciliation, node, false);
     }
 
     /**
@@ -222,7 +221,7 @@ public class KafkaBrokerConfigurationBuilder {
 
         // Generates the controllers quorum list
         // The list should be sorted to avoid random changes to the generated configuration file
-        if (initialControllers != null && !initialControllers.isEmpty()) {
+        if (isDynamicQuorum) {
             // Dynamic quorum
             List<String> quorum = nodes.stream()
                     .filter(NodeRef::controller)
