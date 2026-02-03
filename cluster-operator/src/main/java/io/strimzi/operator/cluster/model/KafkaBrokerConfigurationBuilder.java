@@ -226,7 +226,7 @@ public class KafkaBrokerConfigurationBuilder {
             List<String> quorum = nodes.stream()
                     .filter(NodeRef::controller)
                     .sorted(Comparator.comparingInt(NodeRef::nodeId))
-                    .map(node -> String.format("%s:9090", DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(clusterName), node.podName())))
+                    .map(node -> String.format("%s:%s", DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(clusterName), node.podName()), KafkaCluster.CONTROLPLANE_PORT))
                     .toList();
             writer.println("controller.quorum.bootstrap.servers=" + String.join(",", quorum));
             // TODO: to check that Apache Kafka version is at least 4.2? (minimum version with auto join available)
@@ -240,7 +240,7 @@ public class KafkaBrokerConfigurationBuilder {
             List<String> quorum = nodes.stream()
                     .filter(NodeRef::controller)
                     .sorted(Comparator.comparingInt(NodeRef::nodeId))
-                    .map(node -> String.format("%s@%s:9090", node.nodeId(), DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(clusterName), node.podName())))
+                    .map(node -> String.format("%s@%s:%s", node.nodeId(), DnsNameGenerator.podDnsName(namespace, KafkaResources.brokersServiceName(clusterName), node.podName()), KafkaCluster.CONTROLPLANE_PORT))
                     .toList();
             writer.println("controller.quorum.voters=" + String.join(",", quorum));
         }

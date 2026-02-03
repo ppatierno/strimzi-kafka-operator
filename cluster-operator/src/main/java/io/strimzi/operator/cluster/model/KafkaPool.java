@@ -386,12 +386,14 @@ public class KafkaPool extends AbstractModel {
      *
      * @return  the set of Kafka nodes that used to have the controller role but do not have it anymore.
      */
+    /*
     public Set<NodeRef> usedToBeControllerNodes() {
         return idAssignment.usedToBeController()
                 .stream()
                 .map(nodeId -> new NodeRef(componentName + "-" + nodeId, nodeId, poolName, true, isBroker()))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
+    */
 
     // TODO: to be removed if using Apache Kafka 4.2.0 where the controller quorum auto join feature is used
     /**

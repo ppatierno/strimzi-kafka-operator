@@ -63,6 +63,7 @@ public class NodeIdAssignor {
             TreeSet<Integer> current;
             TreeSet<Integer> desired;
             TreeSet<Integer> usedToBeBroker;
+            // TODO: usedToBeController can be removed, it's not used anymore by the KafkaPool class
             TreeSet<Integer> usedToBeController;
             TreeSet<Integer> becomingController;
             TreeSet<Integer> toBeRemoved = new TreeSet<>();

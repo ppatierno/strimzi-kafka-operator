@@ -520,6 +520,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      *
      * @return  Set of Kafka controller nodes which are going to be removed
      */
+    /*
     public Set<NodeRef> removedControllers() {
         Set<NodeRef> nodes = new LinkedHashSet<>();
 
@@ -531,6 +532,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
 
         return nodes;
     }
+    */
 
     /**
      * Generates list of controller nodes currently running in the Kafka cluster.
@@ -567,6 +569,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      *
      * @return  Set of Kafka node references which are removing the controller role
      */
+    /*
     public Set<NodeRef> usedToBeControllerNodes() {
         Set<NodeRef> nodes = new LinkedHashSet<>();
 
@@ -576,6 +579,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
 
         return nodes;
     }
+    */
 
     // TODO: to be removed if using Apache Kafka 4.2.0 where the controller quorum auto join feature is used
     /**
@@ -2025,11 +2029,12 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                 .sorted(Comparator.comparingInt(NodeRef::nodeId))
                 .map(node -> {
                     String directoryId = controllerDirectoryIds.get(String.valueOf(node.nodeId()));
-                    return String.format("%s@%s:9090:%s",
+                    return String.format("%s@%s:%s:%s",
                             node.nodeId(),
                             DnsNameGenerator.podDnsName(namespace,
                                     KafkaResources.brokersServiceName(cluster),
                                     node.podName()),
+                            CONTROLPLANE_PORT,
                             directoryId);
                 })
                 .collect(Collectors.joining(","));
@@ -2165,12 +2170,14 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
      *
      * @return  True if this is a new cluster, false otherwise
      */
+    /*
     private boolean isNewCluster() {
         // A cluster is new if all controller pools have no current nodes
         return nodePools.stream()
                 .filter(KafkaPool::isController)
                 .allMatch(pool -> pool.idAssignment.current().isEmpty());
     }
+    */
 
     /**
      * When KRaft is enabled, not all nodes might act as brokers as some might be controllers only. So some services

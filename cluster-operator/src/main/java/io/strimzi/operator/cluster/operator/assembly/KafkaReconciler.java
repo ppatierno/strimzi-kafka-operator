@@ -1330,20 +1330,21 @@ public class KafkaReconciler {
     protected Future<Void> reconcileKRaftQuorum(boolean skipRoleChanging) {
         // Skip quorum reconciliation for static quorum clusters
         if (kafka.getControllerDirectoryIds() == null) {
-            LOGGER.infoCr(reconciliation, "Static quorum cluster - skipping KRaft quorum reconciliation");
+            LOGGER.infoCr(reconciliation, "Static quorum cluster, skipping KRaft quorum reconciliation");
             return Future.succeededFuture();
         }
 
         if (kafka.currentControllers().isEmpty()) {
-            // New cluster or no controllers exist yet - Kafka not running, can't query quorum
+            // New cluster or no controllers exist yet, Kafka not running, can't query quorum
             // Use the directory IDs from the model (generated when creating initialControllers)
             controllerDirectoryIds = new HashMap<>(kafka.getControllerDirectoryIds());
-            LOGGER.infoCr(reconciliation, "New cluster - using generated directory IDs from model: {}", controllerDirectoryIds);
+            LOGGER.infoCr(reconciliation, "New cluster, using generated directory IDs from model: {}", controllerDirectoryIds);
             return Future.succeededFuture();
         }
 
         // Gather all the desired controllers across the entire cluster accounting all node pools
-        Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+        //Set<NodeRef> desiredControllers = kafka.nodes().stream().filter(NodeRef::controller).collect(Collectors.toSet());
+        Set<NodeRef> desiredControllers = kafka.controllerNodes();
 
         // If skipRoleChanging is true, exclude nodes that need rolling to become controllers
         if (skipRoleChanging) {
@@ -1357,7 +1358,7 @@ public class KafkaReconciler {
                         adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
                 .compose(quorumInfo -> analyzeQuorumChanges(quorumInfo, desiredControllers))
                 .compose(changes -> {
-                    // Phase 2: Register first (quorum grows - safer)
+                    // Phase 2: Register first (quorum grows, it's safer)
                     if (changes.toRegister.isEmpty()) {
                         return Future.succeededFuture();
                     }
@@ -1391,13 +1392,11 @@ public class KafkaReconciler {
                 })
                 .compose(finalQuorumInfo -> {
                     // Store controller directory IDs from the final quorum state
-                    Map<String, String> dirIds = new HashMap<>();
+                    controllerDirectoryIds = new HashMap<>();
                     for (QuorumInfo.ReplicaState voter : finalQuorumInfo.voters()) {
-                        dirIds.put(String.valueOf(voter.replicaId()),
-                                voter.replicaDirectoryId().toString());
+                        controllerDirectoryIds.put(String.valueOf(voter.replicaId()), voter.replicaDirectoryId().toString());
                     }
-                    controllerDirectoryIds = dirIds;
-                    LOGGER.infoCr(reconciliation, "Successfully reconciled KRaft quorum, directory IDs: {}", dirIds);
+                    LOGGER.infoCr(reconciliation, "Successfully reconciled KRaft quorum, directory IDs: {}", controllerDirectoryIds);
                     return Future.succeededFuture();
                 });
     }
@@ -1429,7 +1428,7 @@ public class KafkaReconciler {
         // PHASE 2: Handle scale-down (voters not in desired)
         for (QuorumInfo.ReplicaState voter : quorumInfo.voters()) {
             if (!desiredVoters.contains(voter.replicaId())) {
-                LOGGER.infoCr(reconciliation, "Controller {} is in voters but not in desired controllers - will unregister", voter.replicaId());
+                LOGGER.infoCr(reconciliation, "Controller {} is in voters but not in desired controllers, will unregister", voter.replicaId());
                 toUnregister.add(voter);
             }
         }
@@ -1459,21 +1458,21 @@ public class KafkaReconciler {
         // Disk change recovery scenario: multiple observers or voter+observer
         if (observers.size() > 1 || (!voters.isEmpty() && !observers.isEmpty())) {
             LOGGER.infoCr(reconciliation,
-                    "Controller {} has multiple incarnations (voters: {}, observers: {}) - reading meta.properties",
+                    "Controller {} has multiple incarnations (voters: {}, observers: {}), reading meta.properties",
                     nodeId, voters.size(), observers.size());
 
             // Read actual directory ID from pod to determine which is current
             return readDirectoryIdFromPod(controller)
                     .compose(actualDirId -> {
                         if (actualDirId == null) {
-                            LOGGER.warnCr(reconciliation, "Could not read directory ID from pod {} - failing reconciliation to retry later", controller.podName());
+                            LOGGER.warnCr(reconciliation, "Could not read directory ID from pod {}, failing reconciliation to retry later", controller.podName());
                             return Future.failedFuture(new RuntimeException("Could not read directory ID from pod " + controller.podName()));
                         }
 
                         // Unregister any voters with wrong directory ID
                         for (QuorumInfo.ReplicaState voter : voters) {
                             if (!voter.replicaDirectoryId().toString().equals(actualDirId)) {
-                                LOGGER.infoCr(reconciliation, "Controller {} voter has stale directory ID {} (actual: {}) - will unregister", nodeId, voter.replicaDirectoryId(), actualDirId);
+                                LOGGER.infoCr(reconciliation, "Controller {} voter has stale directory ID {} (actual: {}), will unregister", nodeId, voter.replicaDirectoryId(), actualDirId);
                                 toUnregister.add(voter);
                             }
                         }
@@ -1489,7 +1488,7 @@ public class KafkaReconciler {
                                     .orElse(null);
 
                             if (correctObserver != null) {
-                                LOGGER.infoCr(reconciliation, "Controller {} observer has correct directory ID {} - will register", nodeId, actualDirId);
+                                LOGGER.infoCr(reconciliation, "Controller {} observer has correct directory ID {}, will register", nodeId, actualDirId);
                                 toRegister.add(correctObserver);
                             }
                         }
@@ -1499,7 +1498,7 @@ public class KafkaReconciler {
         } else if (expectedDirId == null) {
             // New node - not in status yet
             if (!observers.isEmpty()) {
-                LOGGER.infoCr(reconciliation, "Controller {} is new (not in status), observer present - will register", nodeId);
+                LOGGER.infoCr(reconciliation, "Controller {} is new (not in status), observer present, will register", nodeId);
                 toRegister.add(observers.get(0));
             } else if (!voters.isEmpty()) {
                 // Already a voter, nothing to do
@@ -1507,12 +1506,12 @@ public class KafkaReconciler {
             }
             return Future.succeededFuture();
         } else if (!voters.isEmpty() && observers.isEmpty()) {
-            // Controller is only in voters (no observer) - it's already correct, leave it alone
+            // Controller is only in voters (no observer), it's already correct, leave it alone
             // Status might be stale (not synced yet after KafkaRoller changes)
             LOGGER.debugCr(reconciliation, "Controller {} is only in voters - already correct", nodeId);
             return Future.succeededFuture();
         } else {
-            // Only in observers - since multiple observers already handled above, this is a single observer
+            // Only in observers, since multiple observers already handled above, this is a single observer
             // Register it without comparing to expectedDirId (which could be stale)
             if (!observers.isEmpty()) {
                 LOGGER.infoCr(reconciliation, "Controller {} is only in observers - will register", nodeId);

@@ -708,6 +708,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             status.setClusterId(kafka.getStatus().getClusterId());
         }
 
+        // We copy the controller directory IDs if set (for disaster recovery from PVCs)
+        if (kafka.getStatus() != null && kafka.getStatus().getControllerDirectoryIds() != null)  {
+            status.setControllerDirectoryIds(kafka.getStatus().getControllerDirectoryIds());
+        }
+
         return status;
     }
 
