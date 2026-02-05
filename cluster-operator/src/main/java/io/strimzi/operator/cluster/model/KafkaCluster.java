@@ -360,7 +360,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                 result.controllerDirectoryIds.put(nodeIdStr, directoryId);
             }
         }
-        LOGGER.infoCr(reconciliation, "**** controllerDirectoryIds = {}", result.controllerDirectoryIds);
+        LOGGER.infoCr(reconciliation, "controllerDirectoryIds = {}", result.controllerDirectoryIds);
 
         // This also validates that the Kafka version is supported
         result.kafkaVersion = versions.supportedVersion(kafkaClusterSpec.getVersion());

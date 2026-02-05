@@ -751,7 +751,7 @@ public class KafkaNodeUnregistration {
             return VertxUtil
                     .kafkaFutureToVertxFuture(reconciliation, vertx, adminClient.describeMetadataQuorum().quorumInfo())
                     .compose(quorumInfo -> {
-                        LOGGER.infoCr(reconciliation, "**** Describe Metadata Quorum - voters: {}, observers: {}",
+                        LOGGER.infoCr(reconciliation, "Describe Metadata Quorum - voters: {}, observers: {}",
                                 quorumInfo.voters().size(), quorumInfo.observers().size());
                         adminClient.close();
                         return Future.succeededFuture(quorumInfo);

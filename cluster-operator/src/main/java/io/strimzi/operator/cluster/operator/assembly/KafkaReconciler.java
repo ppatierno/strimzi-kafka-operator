@@ -1358,8 +1358,22 @@ public class KafkaReconciler {
                         adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity())
                 .compose(quorumInfo -> analyzeQuorumChanges(quorumInfo, desiredControllers))
                 .compose(changes -> {
-                    // Phase 2: Register first (quorum grows, it's safer)
+                    // Phase 1: Unregister first (allows disk changes where node already exists as voter)
+                    if (changes.toUnregister.isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "No controllers to unregister");
+                        return Future.succeededFuture(changes);
+                    }
+                    LOGGER.infoCr(reconciliation, "Unregistering {} controllers from quorum", changes.toUnregister.size());
+                    return KafkaNodeUnregistration.unregisterControllerReplicas(
+                            reconciliation, vertx, adminClientProvider,
+                            coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(),
+                            new HashSet<>(changes.toUnregister))
+                            .map(changes);
+                })
+                .compose(changes -> {
+                    // Phase 2: Register after (adds new voters or re-adds after disk change)
                     if (changes.toRegister.isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "No controllers to register");
                         return Future.succeededFuture();
                     }
                     LOGGER.infoCr(reconciliation, "Registering {} controllers to quorum", changes.toRegister.size());
@@ -1369,24 +1383,7 @@ public class KafkaReconciler {
                             new HashSet<>(changes.toRegister), desiredControllers);
                 })
                 .compose(v -> {
-                    // Phase 3: Re-read quorum after registration
-                    return KafkaNodeUnregistration.describeMetadataQuorum(reconciliation, vertx,
-                        adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity());
-                })
-                .compose(quorumInfo -> analyzeQuorumChanges(quorumInfo, desiredControllers))
-                .compose(changes -> {
-                    // Phase 4: Unregister after (quorum shrinks only after new voters are in)
-                    if (changes.toUnregister.isEmpty()) {
-                        return Future.succeededFuture();
-                    }
-                    LOGGER.infoCr(reconciliation, "Unregistering {} controllers from quorum", changes.toUnregister.size());
-                    return KafkaNodeUnregistration.unregisterControllerReplicas(
-                            reconciliation, vertx, adminClientProvider,
-                            coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity(),
-                            new HashSet<>(changes.toUnregister));
-                })
-                .compose(v -> {
-                    // Phase 5: Read final quorum state to get directory IDs for status
+                    // Phase 3: Read final quorum state to get directory IDs for status
                     return KafkaNodeUnregistration.describeMetadataQuorum(reconciliation, vertx,
                         adminClientProvider, coTlsPemIdentity.pemTrustSet(), coTlsPemIdentity.pemAuthIdentity());
                 })
@@ -1455,8 +1452,8 @@ public class KafkaReconciler {
                 .filter(rs -> rs.replicaId() == nodeId)
                 .collect(Collectors.toList());
 
-        // Disk change recovery scenario: multiple observers or voter+observer
-        if (observers.size() > 1 || (!voters.isEmpty() && !observers.isEmpty())) {
+        // Disk change recovery scenario: multiple voters, multiple observers, or voter+observer
+        if (voters.size() > 1 || observers.size() > 1 || (!voters.isEmpty() && !observers.isEmpty())) {
             LOGGER.infoCr(reconciliation,
                     "Controller {} has multiple incarnations (voters: {}, observers: {}), reading meta.properties",
                     nodeId, voters.size(), observers.size());
