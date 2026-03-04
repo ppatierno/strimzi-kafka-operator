@@ -1366,7 +1366,7 @@ public class KafkaReconciler {
 
         if (kafka.currentControllers().isEmpty()) {
             // New cluster or no controllers exist yet, Kafka not running, can't query quorum
-            // Use the controller statuses from the model (generated when creating initialControllers)
+            // Use the controller statuses from the model (generated when creating controllers)
             kafkaControllerStatuses = new ArrayList<>(kafka.getKafkaControllerStatuses());
             LOGGER.infoCr(reconciliation, "New cluster, using generated controller statuses from model: {}", kafkaControllerStatuses);
             return Future.succeededFuture();
@@ -1410,7 +1410,7 @@ public class KafkaReconciler {
 
         if (kafka.currentControllers().isEmpty()) {
             // New cluster or no controllers exist yet, Kafka not running, can't query quorum
-            // Use the controller statuses from the model (generated when creating initialControllers)
+            // Use the controller statuses from the model (generated when creating controllers)
             kafkaControllerStatuses = new ArrayList<>(kafka.getKafkaControllerStatuses());
             LOGGER.infoCr(reconciliation, "New cluster, using generated controller statuses from model: {}", kafkaControllerStatuses);
             return Future.succeededFuture();
