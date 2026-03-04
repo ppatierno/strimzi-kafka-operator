@@ -55,16 +55,16 @@ echo ""
 # Format the KRaft storage
 STRIMZI_CLUSTER_ID=$(cat "$KAFKA_HOME/custom-config/cluster.id")
 METADATA_VERSION=$(cat "$KAFKA_HOME/custom-config/metadata.version")
-INITIAL_CONTROLLERS=$(cat "$KAFKA_HOME/custom-config/initial.controllers" 2>/dev/null || true)
+CONTROLLERS=$(cat "$KAFKA_HOME/custom-config/controllers" 2>/dev/null || true)
 
 echo "Making sure the Kraft storage is formatted with cluster ID $STRIMZI_CLUSTER_ID and metadata version $METADATA_VERSION"
-echo "Initial controllers: $INITIAL_CONTROLLERS"
+echo "Controllers: $CONTROLLERS"
 
 # Using "=" to assign arguments for the Kafka storage tool to avoid issues if the generated
 # cluster ID starts with a "-". See https://issues.apache.org/jira/browse/KAFKA-15754.
 # The -g option makes sure the tool will ignore any volumes that are already formatted.
 
-if [ -z "$INITIAL_CONTROLLERS" ]; then
+if [ -z "$CONTROLLERS" ]; then
   # Not using dynamic quorum - use standard formatting
   echo "Not using dynamic quorum, formatting with standard options"
   ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g
@@ -87,25 +87,86 @@ else
       fi
     done
 
-    # Check if it's an initial controller (new cluster) or scale-up
-    # Extract node IDs from INITIAL_CONTROLLERS (format: id@host:port:directory-id,...)
-    INITIAL_CONTROLLER_IDS=$(echo "$INITIAL_CONTROLLERS" | grep -oP '\d+(?=@)' | tr '\n' ' ')
-    echo "Initial controller IDs: $INITIAL_CONTROLLER_IDS"
+    # OLD CODE - Commented out to preserve history
+    # This logic incorrectly used -I for new controllers during scale-up
+    # Check if it's a controller (new cluster) or scale-up
+    # Extract node IDs from CONTROLLERS (format: id@host:port:directory-id,...)
+    #CONTROLLER_IDS=$(echo "$CONTROLLERS" | grep -oP '\d+(?=@)' | tr '\n' ' ')
+    #echo "Controller IDs: $CONTROLLER_IDS"
+    #
+    #if echo "$CONTROLLER_IDS" | grep -qw "$STRIMZI_BROKER_ID"; then
+    #  if [ "$DISK_CHANGED" = true ]; then
+    #    # Disk changed - use -N to generate new random directory ID
+    #    echo "Controller with disk change, formatting with -N (new random directory ID)"
+    #    ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+    #  else
+    #    # This node is a controller with same disk, so using -I (works for both new cluster and restart)
+    #    echo "Controller, formatting with -I"
+    #    ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -I="$CONTROLLERS"
+    #  fi
+    #else
+    #  # This node is NOT a controller, so using -N for scale-up
+    #  echo "Scaling up controller, formatting with -N"
+    #  ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+    #fi
 
-    if echo "$INITIAL_CONTROLLER_IDS" | grep -qw "$STRIMZI_BROKER_ID"; then
+    # NEW CODE - Proper -I vs -N logic
+    # Determine if this is a new cluster or existing cluster operation
+    #
+    # The cluster.new marker is set by the Strimzi operator based on status.clusterId:
+    #   "true"  = Brand new cluster, never bootstrapped before
+    #   "false" = Existing cluster (already bootstrapped)
+    #
+    # The controllers string contains controllers with their directory IDs.
+    # Logic:
+    #   - New cluster: All controllers use -I to bootstrap with specified directory IDs
+    #   - Existing cluster:
+    #     - Controller in controllers list -> use -I to preserve directory ID
+    #       (handles rolling restart, PVC replacement, disaster recovery)
+    #     - Controller NOT in controllers list -> use -N for scale-up
+    #       (Kafka generates new random directory ID)
+    #
+    # The -g (--ignore-formatted) flag ensures already-formatted storage is not reformatted.
+    IS_NEW_CLUSTER=$(cat "$KAFKA_HOME/custom-config/cluster.new" 2>/dev/null || echo "false")
+    echo "New cluster: $IS_NEW_CLUSTER"
+
+    if [ "$IS_NEW_CLUSTER" = "true" ]; then
+      # Brand new cluster: use -I to bootstrap the initial controller quorum
       if [ "$DISK_CHANGED" = true ]; then
-        # Disk changed - use -N to generate new random directory ID
-        echo "Initial controller with disk change, formatting with -N (new random directory ID)"
+        # Disk changed during initial bootstrap, use -N to generate new random directory ID
+        # TODO: should this be removed? is it ever possible?
+        echo "New cluster with disk change, formatting with -N (new random directory ID)"
         ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
       else
-        # This node is an initial controller with same disk, so using -I (works for both new cluster and restart)
-        echo "Initial controller, formatting with -I"
-        ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -I="$INITIAL_CONTROLLERS"
+        # Normal new cluster bootstrap, use -I with controllers list
+        echo "New cluster initial bootstrap, formatting with -I"
+        ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -I="$CONTROLLERS"
       fi
     else
-      # This node is NOT an initial controller, so using -N for scale-up
-      echo "Scaling up controller, formatting with -N"
-      ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+      # Existing cluster: check if this controller is in the controllers list
+      # Extract node IDs from CONTROLLERS (format: id@host:port:directory-id,...)
+      CONTROLLER_IDS=$(echo "$CONTROLLERS" | grep -oP '\d+(?=@)' | tr '\n' ' ')
+      echo "Controllers in controllers list: $CONTROLLER_IDS"
+
+      if echo "$CONTROLLER_IDS" | grep -qw "$STRIMZI_BROKER_ID"; then
+        # This controller is in the initial.controllers list
+        if [ "$DISK_CHANGED" = true ]; then
+          # Disk changed, use -N to generate new random directory ID
+          echo "Existing cluster, disk changed, formatting with -N (new random directory ID)"
+          ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+        else
+          # Use -I to format with the directory ID from controllers
+          # This handles: rolling restart, PVC replacement, disaster recovery
+          # The -g flag will skip if already formatted
+          echo "Existing cluster, controller in list, formatting with -I to preserve directory ID"
+          ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -I="$CONTROLLERS"
+        fi
+      else
+        # This controller is NOT in the controllers list
+        # This is a new controller being added during scale-up
+        echo "New controller being added to existing cluster, formatting with -N"
+        ./bin/kafka-storage.sh format -t="$STRIMZI_CLUSTER_ID" -r="$METADATA_VERSION" -c=/tmp/strimzi.properties -g -N
+      fi
     fi
   else
     # This is a broker with dynamic quorum, always use -N
