@@ -23,7 +23,7 @@ import org.apache.kafka.clients.admin.QuorumInfo;
 import org.apache.kafka.clients.admin.RaftVoterEndpoint;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -223,7 +223,7 @@ public class KRaftQuorumReconciler {
             unregisterFuture = KafkaNodeUnregistration.unregisterControllerReplicas(
                     reconciliation, adminClientProvider,
                     coIdentity.trustSet(), coIdentity.authIdentity(),
-                    new HashSet<>(changes.toUnregister()));
+                    new LinkedHashSet<>(changes.toUnregister()));
         }
 
         // Phase 2: Register after (adds new voters or re-adds after disk change)
@@ -322,6 +322,20 @@ public class KRaftQuorumReconciler {
                                 if (err != null) {
                                     result.completeExceptionally(err);
                                 } else {
+                                    // Reorder toUnregister set to put leader last (minimize leader elections)
+                                    int leaderId = quorumInfo.leaderId();
+                                    if (leaderId >= 0 && !toUnregister.isEmpty()) {
+                                        toUnregister.stream()
+                                            .filter(replica -> replica.replicaId() == leaderId)
+                                            .findFirst()
+                                            .ifPresent(leaderReplica -> {
+                                                toUnregister.remove(leaderReplica);
+                                                toUnregister.add(leaderReplica);
+                                                LOGGER.infoCr(reconciliation,
+                                                    "Controller leader {} will be unregistered last to minimize leader elections",
+                                                    leaderId);
+                                            });
+                                    }
                                     result.complete(new QuorumChanges(toRegister, toUnregister));
                                 }
                             });
