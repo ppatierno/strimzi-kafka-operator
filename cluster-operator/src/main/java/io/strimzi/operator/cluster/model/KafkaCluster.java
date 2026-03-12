@@ -225,9 +225,11 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     private String metadataVersion;
     private String clusterId;
     private List<KafkaControllerStatus> kafkaControllerStatuses;
-    // NEW: Track whether this is a brand new cluster (vs existing cluster)
-    // Used to determine -I vs -N formatting in kafka_run.sh
-    private boolean isNewCluster;
+    // OLD CODE - Commented out (converted to local variable in fromCrd() method)
+    // isNewCluster only used within fromCrd() for directory ID generation logic
+    // // NEW: Track whether this is a brand new cluster (vs existing cluster)
+    // // Used to determine -I vs -N formatting in kafka_run.sh
+    // private boolean isNewCluster;
     private JmxModel jmx;
     private CruiseControlMetricsReporter ccMetricsReporter;
     private MetricsModel metrics;
@@ -340,11 +342,16 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         // - Existing dynamic quorum: clusterId exists, controllers exist -> isNewCluster = false
         // - Migration static to dynamic: clusterId exists -> isNewCluster = false
         // - Disaster recovery: clusterId manually set -> isNewCluster = false
-        result.isNewCluster = kafka.getStatus() == null ||
-                              kafka.getStatus().getClusterId() == null ||
-                              kafka.getStatus().getClusterId().isEmpty();
+        // OLD CODE - Commented out (member variable assignment)
+        // result.isNewCluster = kafka.getStatus() == null ||
+        //                       kafka.getStatus().getClusterId() == null ||
+        //                       kafka.getStatus().getClusterId().isEmpty();
+        // NEW CODE - Local variable (scoped to fromCrd() method only)
+        boolean isNewCluster = kafka.getStatus() == null ||
+                               kafka.getStatus().getClusterId() == null ||
+                               kafka.getStatus().getClusterId().isEmpty();
 
-        LOGGER.infoCr(reconciliation, "isNewCluster = {}", result.isNewCluster);
+        LOGGER.infoCr(reconciliation, "isNewCluster = {}", isNewCluster);
 
         if (kafka.getStatus() == null || kafka.getStatus().getControllers() != null) {
             // Build controller statuses for KRaft dynamic quorum mode
@@ -386,7 +393,10 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
             // NEW CODE - Different logic based on new vs existing cluster
             result.kafkaControllerStatuses = new ArrayList<>();
 
-            if (result.isNewCluster) {
+            // OLD CODE - Commented out (member variable reference)
+            // if (result.isNewCluster) {
+            // NEW CODE - Local variable reference
+            if (isNewCluster) {
                 // NEW CLUSTER: Generate UUIDs for all controllers
                 LOGGER.infoCr(reconciliation, "New cluster, generating directory IDs for all controllers");
                 for (NodeRef controller : result.controllerNodes()) {
@@ -1980,9 +1990,11 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                 if (controllers != null) {
                     data.put(CONTROLLERS_FILENAME, controllers);
 
-                    // NEW CODE, add cluster.new marker
-                    // This tells kafka_run.sh whether this is a new cluster or existing cluster operation
-                    data.put("cluster.new", isNewCluster ? "true" : "false");
+                    // OLD CODE - Commented out (cluster.new no longer used by kafka_run.sh)
+                    // kafka_run.sh now determines formatting based on controller membership in CONTROLLERS list
+                    // // NEW CODE, add cluster.new marker
+                    // // This tells kafka_run.sh whether this is a new cluster or existing cluster operation
+                    // data.put("cluster.new", isNewCluster ? "true" : "false");
                 }
 
                 configMaps.add(ConfigMapUtils.createConfigMap(node.podName(), namespace, pool.labels.withStrimziPodName(node.podName()), pool.ownerReference, data));
