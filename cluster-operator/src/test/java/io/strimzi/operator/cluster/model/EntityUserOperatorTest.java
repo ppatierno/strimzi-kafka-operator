@@ -23,6 +23,7 @@ import io.strimzi.api.kafka.model.kafka.entityoperator.EntityUserOperatorSpecBui
 import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.common.Reconciliation;
@@ -118,7 +119,8 @@ public class EntityUserOperatorTest {
         assertThat(EUO.livenessProbeOptions.getSuccessThreshold(), is(5));
         assertThat(EUO.livenessProbeOptions.getFailureThreshold(), is(12));
         assertThat(EUO.livenessProbeOptions.getPeriodSeconds(), is(180));
-        assertThat(EUO.watchedNamespace(), is("my-user-namespace"));
+        // Feature disabled by default, so watchedNamespace is forced to cluster namespace and the one in the spec is ignored
+        assertThat(EUO.watchedNamespace(), is(NAMESPACE));
         assertThat(EUO.reconciliationIntervalMs, is(60_000L));
         assertThat(EUO.kafkaBootstrapServers, is(String.format("%s:%d", KafkaResources.bootstrapServiceName(CLUSTER_NAME), EntityUserOperatorSpec.DEFAULT_BOOTSTRAP_SERVERS_PORT)));
         assertThat(EUO.logging().getLogging().getType(), is(InlineLogging.TYPE_INLINE));
@@ -357,22 +359,6 @@ public class EntityUserOperatorTest {
     }
 
     @Test
-    public void testWatchedNamespace() {
-        Kafka resource = new KafkaBuilder(KAFKA)
-                .editSpec()
-                    .withNewEntityOperator()
-                        .withNewUserOperator()
-                            .withWatchedNamespace("some-other-namespace")
-                        .endUserOperator()
-                    .endEntityOperator()
-                .endSpec()
-                .build();
-        EntityUserOperator entityUserOperator = EntityUserOperator.fromCrd(new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()), resource, SHARED_ENV_PROVIDER, ResourceUtils.dummyClusterOperatorConfig());
-
-        assertThat(entityUserOperator.watchedNamespace(), is("some-other-namespace"));
-    }
-
-    @Test
     public void testSecurityProvider() {
         EntityUserOperator euo = EntityUserOperator.fromCrd(new Reconciliation("test", KAFKA.getKind(), KAFKA.getMetadata().getNamespace(), KAFKA.getMetadata().getName()), KAFKA, SHARED_ENV_PROVIDER, ResourceUtils.dummyClusterOperatorConfig());
         euo.securityProvider = new TestPodSecurityProvider();
@@ -385,6 +371,82 @@ public class EntityUserOperatorTest {
         assertThat(cont.getSecurityContext().getCapabilities().getDrop(), is(List.of("ALL")));
     }
 
+    @Test
+    public void testWatchedNamespaceWithFeatureDisabled() {
+        // Feature is disabled by default in dummyClusterOperatorConfig()
+        Kafka resource = new KafkaBuilder(KAFKA)
+                .editSpec()
+                    .withNewEntityOperator()
+                        .withNewUserOperator()
+                            .withWatchedNamespace("some-other-namespace")
+                        .endUserOperator()
+                    .endEntityOperator()
+                .endSpec()
+                .build();
+
+        EntityUserOperator entityUserOperator = EntityUserOperator.fromCrd(
+                new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()),
+                resource,
+                SHARED_ENV_PROVIDER,
+                ResourceUtils.dummyClusterOperatorConfig());
+
+        // When feature is disabled, watchedNamespace should be forced to cluster namespace
+        assertThat(entityUserOperator.watchedNamespace(), is(NAMESPACE));
+    }
+
+    @Test
+    public void testWatchedNamespaceWithFeatureEnabled() {
+        // Build config with feature enabled
+        ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
+                .with(ClusterOperatorConfig.ENTITY_WATCHED_NAMESPACE_ENABLED.key(), "true")
+                .build();
+
+        Kafka resource = new KafkaBuilder(KAFKA)
+                .editSpec()
+                    .withNewEntityOperator()
+                        .withNewUserOperator()
+                            .withWatchedNamespace("some-other-namespace")
+                        .endUserOperator()
+                    .endEntityOperator()
+                .endSpec()
+                .build();
+
+        EntityUserOperator entityUserOperator = EntityUserOperator.fromCrd(
+                new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()),
+                resource,
+                SHARED_ENV_PROVIDER,
+                config);
+
+        // When feature is enabled, watchedNamespace should respect the spec
+        assertThat(entityUserOperator.watchedNamespace(), is("some-other-namespace"));
+    }
+
+    @Test
+    public void testWatchedNamespaceDefaultsToClusterNamespaceWhenFeatureEnabled() {
+        // Build config with feature enabled
+        ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
+                .with(ClusterOperatorConfig.ENTITY_WATCHED_NAMESPACE_ENABLED.key(), "true")
+                .build();
+
+        Kafka resource = new KafkaBuilder(KAFKA)
+                .editSpec()
+                    .withNewEntityOperator()
+                        .withNewUserOperator()
+                        .endUserOperator()
+                    .endEntityOperator()
+                .endSpec()
+                .build();
+
+        EntityUserOperator entityUserOperator = EntityUserOperator.fromCrd(
+                new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()),
+                resource,
+                SHARED_ENV_PROVIDER,
+                config);
+
+        // When watchedNamespace is not specified, it should default to cluster namespace
+        assertThat(entityUserOperator.watchedNamespace(), is(NAMESPACE));
+    }
+
     ////////////////////
     // Utility methods
     ////////////////////
@@ -392,7 +454,8 @@ public class EntityUserOperatorTest {
     private List<EnvVar> getExpectedEnvVars() {
         List<EnvVar> expected = new ArrayList<>();
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_KAFKA_BOOTSTRAP_SERVERS).withValue(String.format("%s:%d", "my-cluster-kafka-bootstrap", EntityUserOperatorSpec.DEFAULT_BOOTSTRAP_SERVERS_PORT)).build());
-        expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_WATCHED_NAMESPACE).withValue("my-user-namespace").build());
+        // Feature disabled by default, so watchedNamespace is the cluster namespace
+        expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_WATCHED_NAMESPACE).withValue(NAMESPACE).build());
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_RESOURCE_LABELS).withValue(ModelUtils.defaultResourceLabels(CLUSTER_NAME)).build());
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_FULL_RECONCILIATION_INTERVAL_MS).withValue(String.valueOf(60_000L)).build());
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_CLIENTS_CA_KEY_SECRET_NAME).withValue(KafkaResources.clientsCaKeySecretName(CLUSTER_NAME)).build());

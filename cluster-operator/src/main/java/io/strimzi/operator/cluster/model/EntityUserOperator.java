@@ -29,6 +29,7 @@ import io.strimzi.operator.cluster.model.logging.LoggingModel;
 import io.strimzi.operator.cluster.model.logging.SupportsLogging;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +40,8 @@ import java.util.Map;
  * Represents the User Operator deployment
  */
 public class EntityUserOperator extends AbstractModel implements SupportsLogging {
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(EntityUserOperator.class);
+
     protected static final String COMPONENT_TYPE = "entity-user-operator";
     
     protected static final String USER_OPERATOR_CONTAINER_NAME = "user-operator";
@@ -132,7 +135,22 @@ public class EntityUserOperator extends AbstractModel implements SupportsLogging
             }
             result.image = image;
 
-            result.watchedNamespace = userOperatorSpec.getWatchedNamespace() != null ? userOperatorSpec.getWatchedNamespace() : kafkaAssembly.getMetadata().getNamespace();
+            // Set watched namespace based on the feature being enabled or not
+            if (config.isEntityWatchedNamespaceEnabled()) {
+                // Feature enabled, using the value from the spec
+                result.watchedNamespace = userOperatorSpec.getWatchedNamespace() != null ? userOperatorSpec.getWatchedNamespace() : kafkaAssembly.getMetadata().getNamespace();
+            } else {
+                // Feature disabled, force cluster namespace and warn that the specified value is ignored
+                if (userOperatorSpec.getWatchedNamespace() != null
+                        && !userOperatorSpec.getWatchedNamespace().equals(kafkaAssembly.getMetadata().getNamespace())) {
+                    LOGGER.warnCr(reconciliation, "User Operator watchedNamespace is set to '{}' but the feature is disabled. " +
+                                    "The User Operator will only watch the namespace '{}' where the Kafka cluster is deployed.",
+                            userOperatorSpec.getWatchedNamespace(),
+                            kafkaAssembly.getMetadata().getNamespace());
+                }
+                result.watchedNamespace = kafkaAssembly.getMetadata().getNamespace();
+            }
+
             result.reconciliationIntervalMs = userOperatorSpec.getReconciliationIntervalMs();
             result.secretPrefix = userOperatorSpec.getSecretPrefix() == null ? EntityUserOperatorSpec.DEFAULT_SECRET_PREFIX : userOperatorSpec.getSecretPrefix();
             result.logging = new LoggingModel(userOperatorSpec, result.getClass().getSimpleName());

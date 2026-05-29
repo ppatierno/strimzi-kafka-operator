@@ -30,6 +30,7 @@ import io.strimzi.operator.cluster.model.logging.LoggingModel;
 import io.strimzi.operator.cluster.model.logging.SupportsLogging;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.model.Ca;
 
 import java.util.ArrayList;
@@ -41,6 +42,8 @@ import java.util.Map;
  * Represents the Topic Operator deployment
  */
 public class EntityTopicOperator extends AbstractModel implements SupportsLogging {
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(EntityTopicOperator.class);
+
     protected static final String COMPONENT_TYPE = "entity-topic-operator";
 
     protected static final String TOPIC_OPERATOR_CONTAINER_NAME = "topic-operator";
@@ -144,7 +147,23 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
                 image = System.getenv().getOrDefault(ClusterOperatorConfig.STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE, "quay.io/strimzi/operator:latest");
             }
             result.image = image;
-            result.watchedNamespace = topicOperatorSpec.getWatchedNamespace() != null ? topicOperatorSpec.getWatchedNamespace() : kafkaAssembly.getMetadata().getNamespace();
+
+            // Set watched namespace based on the feature being enabled or not
+            if (config.isEntityWatchedNamespaceEnabled()) {
+                // Feature enabled, using the value from the spec
+                result.watchedNamespace = topicOperatorSpec.getWatchedNamespace() != null ? topicOperatorSpec.getWatchedNamespace() : kafkaAssembly.getMetadata().getNamespace();
+            } else {
+                // Feature disabled, force cluster namespace and warn that the specified value is ignored
+                if (topicOperatorSpec.getWatchedNamespace() != null
+                        && !topicOperatorSpec.getWatchedNamespace().equals(kafkaAssembly.getMetadata().getNamespace())) {
+                    LOGGER.warnCr(reconciliation, "Topic Operator watchedNamespace is set to '{}' but the feature is disabled. " +
+                                    "The Topic Operator will only watch the namespace '{}' where the Kafka cluster is deployed.",
+                            topicOperatorSpec.getWatchedNamespace(),
+                            kafkaAssembly.getMetadata().getNamespace());
+                }
+                result.watchedNamespace = kafkaAssembly.getMetadata().getNamespace();
+            }
+
             result.reconciliationIntervalMs = topicOperatorSpec.getReconciliationIntervalMs();
             result.logging = new LoggingModel(topicOperatorSpec, result.getClass().getSimpleName());
             result.gcLoggingEnabled = topicOperatorSpec.getJvmOptions() == null ? JvmOptions.DEFAULT_GC_LOGGING_ENABLED : topicOperatorSpec.getJvmOptions().isGcLoggingEnabled();

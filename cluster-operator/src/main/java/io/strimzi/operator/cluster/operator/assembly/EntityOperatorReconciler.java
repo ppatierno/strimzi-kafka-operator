@@ -169,7 +169,8 @@ public class EntityOperatorReconciler {
         if (entityOperator != null && entityOperator.topicOperator() != null) {
             String watchedNamespace = entityOperator.topicOperator().watchedNamespace();
 
-            if (!watchedNamespace.equals(reconciliation.namespace())) {
+            if (entityOperator.isEntityWatchedNamespaceEnabled()
+                    && !watchedNamespace.equals(reconciliation.namespace())) {
                 return roleOperator
                         .reconcile(
                                 reconciliation,
@@ -195,7 +196,8 @@ public class EntityOperatorReconciler {
         if (entityOperator != null && entityOperator.userOperator() != null) {
             String watchedNamespace = entityOperator.userOperator().watchedNamespace();
 
-            if (!watchedNamespace.equals(reconciliation.namespace())) {
+            if (entityOperator.isEntityWatchedNamespaceEnabled()
+                    && !watchedNamespace.equals(reconciliation.namespace())) {
                 return roleOperator
                         .reconcile(
                                 reconciliation,
@@ -223,7 +225,8 @@ public class EntityOperatorReconciler {
             String watchedNamespace = entityOperator.topicOperator().watchedNamespace();
 
             Future<ReconcileResult<RoleBinding>> watchedNamespaceFuture;
-            if (!watchedNamespace.equals(reconciliation.namespace()))    {
+            if (entityOperator.isEntityWatchedNamespaceEnabled()
+                    && !watchedNamespace.equals(reconciliation.namespace()))    {
                 watchedNamespaceFuture = roleBindingOperator.reconcile(reconciliation, watchedNamespace,
                         KafkaResources.entityTopicOperatorRoleBinding(reconciliation.name()), entityOperator.topicOperator().generateRoleBindingForRole(reconciliation.namespace(), watchedNamespace));
             } else {
@@ -254,7 +257,8 @@ public class EntityOperatorReconciler {
             String watchedNamespace = entityOperator.userOperator().watchedNamespace();
 
             Future<ReconcileResult<RoleBinding>> watchedNamespaceFuture;
-            if (!watchedNamespace.equals(reconciliation.namespace()))    {
+            if (entityOperator.isEntityWatchedNamespaceEnabled()
+                    && !watchedNamespace.equals(reconciliation.namespace()))    {
                 watchedNamespaceFuture = roleBindingOperator.reconcile(reconciliation, watchedNamespace,
                         KafkaResources.entityUserOperatorRoleBinding(reconciliation.name()), entityOperator.userOperator().generateRoleBindingForRole(reconciliation.namespace(), watchedNamespace));
             } else {
