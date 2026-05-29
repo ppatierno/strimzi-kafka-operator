@@ -95,7 +95,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: STRIMZI_ENTITY_WATCHED_NAMESPACE_ENABLED
+            - name: STRIMZI_ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED
               value: "false"
           livenessProbe:
             httpGet:

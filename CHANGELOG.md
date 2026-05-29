@@ -14,12 +14,12 @@
 
 ### Major changes, deprecations, and removals
 
-* **Entity Operator cross-namespace watching is now controlled by the `STRIMZI_ENTITY_WATCHED_NAMESPACE_ENABLED` environment variable in the Cluster Operator.**
+* **Entity Operator cross-namespace watching is now controlled by the `STRIMZI_ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED` environment variable in the Cluster Operator.**
   **This feature is now disabled by default.**
-  If you have `watchedNamespace` configured in your Kafka CR's Entity Operator sections and it differs from the cluster namespace, you must set `STRIMZI_ENTITY_WATCHED_NAMESPACE_ENABLED=true` in the Cluster Operator deployment:
+  If you have `watchedNamespace` configured in your Kafka CR's Entity Operator sections and it differs from the cluster namespace, you must set `STRIMZI_ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED=true` in the Cluster Operator deployment:
   ```yaml
   env:
-    - name: STRIMZI_ENTITY_WATCHED_NAMESPACE_ENABLED
+    - name: STRIMZI_ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED
       value: "true"
   ```
 

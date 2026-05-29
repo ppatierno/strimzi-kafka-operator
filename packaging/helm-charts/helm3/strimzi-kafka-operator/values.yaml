@@ -213,4 +213,4 @@ connectBuildTimeoutMs: 300000
 # Controls whether Strimzi generates pod disruption budget resources (By default true)
 generatePodDisruptionBudget: true
 # Enable watched namespace feature for Entity Operators (By default false)
-entityWatchedNamespaceEnabled: false
+entityOperatorWatchedNamespaceEnabled: false

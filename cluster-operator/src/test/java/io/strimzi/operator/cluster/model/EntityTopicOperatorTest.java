@@ -331,7 +331,7 @@ public class EntityTopicOperatorTest {
     public void testWatchedNamespaceWithFeatureEnabled() {
         // Build config with feature enabled
         ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
-                .with(ClusterOperatorConfig.ENTITY_WATCHED_NAMESPACE_ENABLED.key(), "true")
+                .with(ClusterOperatorConfig.ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED.key(), "true")
                 .build();
 
         Kafka resource = new KafkaBuilder(KAFKA)
@@ -358,7 +358,7 @@ public class EntityTopicOperatorTest {
     public void testWatchedNamespaceDefaultsToClusterNamespaceWhenFeatureEnabled() {
         // Build config with feature enabled
         ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
-                .with(ClusterOperatorConfig.ENTITY_WATCHED_NAMESPACE_ENABLED.key(), "true")
+                .with(ClusterOperatorConfig.ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED.key(), "true")
                 .build();
 
         Kafka resource = new KafkaBuilder(KAFKA)

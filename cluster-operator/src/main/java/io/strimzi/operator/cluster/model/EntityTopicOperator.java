@@ -149,7 +149,7 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
             result.image = image;
 
             // Set watched namespace based on the feature being enabled or not
-            if (config.isEntityWatchedNamespaceEnabled()) {
+            if (config.isEntityOperatorWatchedNamespaceEnabled()) {
                 // Feature enabled, using the value from the spec
                 result.watchedNamespace = topicOperatorSpec.getWatchedNamespace() != null ? topicOperatorSpec.getWatchedNamespace() : kafkaAssembly.getMetadata().getNamespace();
             } else {
@@ -157,7 +157,8 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
                 if (topicOperatorSpec.getWatchedNamespace() != null
                         && !topicOperatorSpec.getWatchedNamespace().equals(kafkaAssembly.getMetadata().getNamespace())) {
                     LOGGER.warnCr(reconciliation, "Topic Operator watchedNamespace is set to '{}' but the feature is disabled. " +
-                                    "The Topic Operator will only watch the namespace '{}' where the Kafka cluster is deployed.",
+                                    "The Topic Operator will only watch the namespace '{}' where the Kafka cluster is deployed." +
+                                    "To enable it, set STRIMZI_ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED in the Cluster Operator configuration.",
                             topicOperatorSpec.getWatchedNamespace(),
                             kafkaAssembly.getMetadata().getNamespace());
                 }

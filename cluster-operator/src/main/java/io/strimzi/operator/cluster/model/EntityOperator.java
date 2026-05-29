@@ -65,7 +65,7 @@ public class EntityOperator extends AbstractModel {
     private EntityTopicOperator topicOperator;
     private EntityUserOperator userOperator;
     /* test */ boolean cruiseControlEnabled;
-    private boolean entityWatchedNamespaceEnabled;
+    private boolean entityOperatorWatchedNamespaceEnabled;
 
     private ResourceTemplate templateRole;
     private DeploymentTemplate templateDeployment;
@@ -117,7 +117,7 @@ public class EntityOperator extends AbstractModel {
             result.topicOperator = topicOperator;
             result.cruiseControlEnabled = kafkaAssembly.getSpec().getCruiseControl() != null;
             result.userOperator = userOperator;
-            result.entityWatchedNamespaceEnabled = config.isEntityWatchedNamespaceEnabled();
+            result.entityOperatorWatchedNamespaceEnabled = config.isEntityOperatorWatchedNamespaceEnabled();
 
             if (entityOperatorSpec.getTemplate() != null) {
                 EntityOperatorTemplate template = entityOperatorSpec.getTemplate();
@@ -166,8 +166,8 @@ public class EntityOperator extends AbstractModel {
      *
      * @return  true if the feature is enabled, false otherwise
      */
-    public boolean isEntityWatchedNamespaceEnabled() {
-        return entityWatchedNamespaceEnabled;
+    public boolean isEntityOperatorWatchedNamespaceEnabled() {
+        return entityOperatorWatchedNamespaceEnabled;
     }
 
     /**

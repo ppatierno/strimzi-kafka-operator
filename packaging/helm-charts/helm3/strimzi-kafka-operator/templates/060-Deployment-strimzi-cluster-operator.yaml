@@ -179,8 +179,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: STRIMZI_ENTITY_WATCHED_NAMESPACE_ENABLED
-              value: {{ .Values.entityWatchedNamespaceEnabled | quote }}
+            - name: STRIMZI_ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED
+              value: {{ .Values.entityOperatorWatchedNamespaceEnabled | quote }}
           livenessProbe:
             httpGet:
               path: /healthy

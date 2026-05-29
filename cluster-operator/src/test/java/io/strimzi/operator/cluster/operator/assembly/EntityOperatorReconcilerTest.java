@@ -272,7 +272,7 @@ public class EntityOperatorReconcilerTest {
                 .build();
 
         ClusterOperatorConfig config = new ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
-                .with(ClusterOperatorConfig.ENTITY_WATCHED_NAMESPACE_ENABLED.key(), "true")
+                .with(ClusterOperatorConfig.ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED.key(), "true")
                 .build();
 
         EntityOperatorReconciler rcnclr = new EntityOperatorReconciler(
@@ -394,7 +394,7 @@ public class EntityOperatorReconcilerTest {
                 .build();
 
         ClusterOperatorConfig config = new ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
-                .with(ClusterOperatorConfig.ENTITY_WATCHED_NAMESPACE_ENABLED.key(), "false")
+                .with(ClusterOperatorConfig.ENTITY_OPERATOR_WATCHED_NAMESPACE_ENABLED.key(), "false")
                 .build();
 
         EntityOperatorReconciler rcnclr = new EntityOperatorReconciler(
